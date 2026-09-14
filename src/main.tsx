@@ -751,11 +751,11 @@ function AuthLoading() {
   return <div className="auth-screen auth-loading"><div className="auth-brand-mark"><img src={assetUrl("flight-deck-mark.svg")} alt="" /></div><div className="eyebrow lime">FLIGHT DECK</div><span>Preparing secure operator access…</span></div>;
 }
 
-type AuthView = "signin" | "signup" | "code";
+type AuthView = "code" | "password" | "signup";
 type AuthComplete = (email: string, name?: string) => void;
 
 function AccountAccess({ onSignedIn, compact = false }: { onSignedIn: AuthComplete; compact?: boolean }) {
-  const [view, setView] = useState<AuthView>("signin");
+  const [view, setView] = useState<AuthView>("code");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -772,6 +772,7 @@ function AccountAccess({ onSignedIn, compact = false }: { onSignedIn: AuthComple
     setMessage("");
     setCodeSent(false);
     setCodeDigits(Array(6).fill(""));
+    setShowPassword(false);
   };
 
   const passwordSignIn = async () => {
@@ -821,7 +822,7 @@ function AccountAccess({ onSignedIn, compact = false }: { onSignedIn: AuthComple
     } else if (result.signedIn) {
       onSignedIn(result.email, result.name);
     } else {
-      setView("signin");
+      setView("password");
       setPassword("");
       setConfirmPassword("");
       setMessageTone("success");
@@ -882,7 +883,16 @@ function AccountAccess({ onSignedIn, compact = false }: { onSignedIn: AuthComple
   };
 
   const updateDigit = (index: number, value: string) => {
-    const digit = value.replace(/\D/g, "").slice(-1);
+    const digits = value.replace(/\D/g, "");
+    if (digits.length > 1) {
+      setCodeDigits((current) => current.map((item, itemIndex) => {
+        const nextDigit = digits[itemIndex - index];
+        return itemIndex >= index && nextDigit !== undefined ? nextDigit : item;
+      }));
+      document.getElementById((compact ? "modal-otp-" : "otp-") + Math.min(index + digits.length, 5))?.focus();
+      return;
+    }
+    const digit = digits.slice(-1);
     setCodeDigits((current) => current.map((item, itemIndex) => itemIndex === index ? digit : item));
     if (digit && index < 5) document.getElementById((compact ? "modal-otp-" : "otp-") + (index + 1))?.focus();
   };
@@ -896,26 +906,48 @@ function AccountAccess({ onSignedIn, compact = false }: { onSignedIn: AuthComple
   };
 
   return <div className={compact ? "account-access compact" : "account-access"}>
-    <div className="auth-tabs" role="tablist" aria-label="Account access options">
-      <button role="tab" aria-selected={view === "signin"} className={view === "signin" ? "selected" : ""} onClick={() => selectView("signin")}>Sign in</button>
-      <button role="tab" aria-selected={view === "signup"} className={view === "signup" ? "selected" : ""} onClick={() => selectView("signup")}>Create account</button>
-      <button role="tab" aria-selected={view === "code"} className={view === "code" ? "selected" : ""} onClick={() => selectView("code")}>Email code</button>
-    </div>
-
-    {view === "signin" && <form className="auth-form" onSubmit={(event) => { event.preventDefault(); passwordSignIn(); }}>
+    {view === "code" && <form className="auth-form simple-auth-form" onSubmit={(event) => { event.preventDefault(); codeSent ? verifyCode() : requestCode(); }}>
+      <div className="auth-progress" aria-label={codeSent ? "Step 2 of 2" : "Step 1 of 2"}>
+        <span className={codeSent ? "complete" : "active"}><i>{codeSent ? "✓" : "1"}</i><b>Email</b></span>
+        <em className={codeSent ? "complete" : ""} />
+        <span className={codeSent ? "active" : ""}><i>2</i><b>Code</b></span>
+      </div>
       <div className="eyebrow lime">SECURE OPERATOR ACCESS</div>
+      <h2>{codeSent ? "Enter your code" : "Sign in to Flight Deck"}</h2>
+      <p>{codeSent ? "We sent a six-digit verification code to your email." : "Enter your email and we’ll send you a secure six-digit code. No password needed."}</p>
+
+      {!codeSent ? <>
+        <label className="auth-field"><span>Email address</span><input className="auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" autoComplete="email" autoFocus={!compact} required /></label>
+        <button className="primary-button wide" type="submit" disabled={busy}>{busy ? "Sending code..." : "Send 6-digit code →"}</button>
+        <div className="auth-method-divider"><span>or</span></div>
+        <button className="auth-secondary-button" type="button" onClick={() => selectView("password")}>Sign in with password</button>
+        <div className="auth-switch-line"><span>New to Flight Deck?</span><button className="text-button" type="button" onClick={() => selectView("signup")}>Create an account</button></div>
+      </> : <>
+        <div className="auth-email-preview"><span>CODE SENT TO</span><strong>{email}</strong><button type="button" onClick={() => { setCodeSent(false); setCodeDigits(Array(6).fill("")); setMessage(""); }}>Change</button></div>
+        <div className="code-grid" onPaste={pasteCode}>{codeDigits.map((digit, index) => <input id={(compact ? "modal-otp-" : "otp-") + index} key={index} className="code-cell" type="text" inputMode="numeric" maxLength={1} value={digit} onChange={(event) => updateDigit(index, event.target.value)} onFocus={(event) => event.currentTarget.select()} onKeyDown={(event) => { const prefix = compact ? "modal-otp-" : "otp-"; if (event.key === "Backspace" && !digit && index > 0) document.getElementById(prefix + (index - 1))?.focus(); if (event.key === "ArrowLeft" && index > 0) document.getElementById(prefix + (index - 1))?.focus(); if (event.key === "ArrowRight" && index < 5) document.getElementById(prefix + (index + 1))?.focus(); }} aria-label={"Verification digit " + (index + 1)} autoComplete={index === 0 ? "one-time-code" : "off"} />)}</div>
+        <small className="auth-code-hint">Paste the full code or enter one number in each box.</small>
+        <button className="primary-button wide" type="submit" disabled={busy || codeDigits.join("").length !== 6}>{busy ? "Verifying..." : "Verify & enter workspace →"}</button>
+        <div className="auth-inline-actions"><button className="text-button" type="button" onClick={() => { setCodeSent(false); setCodeDigits(Array(6).fill("")); setMessage(""); }}>Use another email</button><button className="text-button" type="button" onClick={requestCode} disabled={busy}>Resend code</button></div>
+      </>}
+    </form>}
+
+    {view === "password" && <form className="auth-form" onSubmit={(event) => { event.preventDefault(); passwordSignIn(); }}>
+      <button className="auth-back-button" type="button" onClick={() => selectView("code")}>← Use email code</button>
+      <div className="eyebrow lime">PASSWORD SIGN IN</div>
       <h2>Welcome back</h2>
-      <p>Sign in to open your protected aircraft workspace.</p>
+      <p>Use the password attached to your operator account.</p>
       <label className="auth-field"><span>Email address</span><input className="auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" autoComplete="email" required /></label>
       <label className="auth-field"><span>Password</span><div className="password-input-wrap"><input className="auth-input" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" autoComplete="current-password" required /><button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? "Hide" : "Show"}</button></div></label>
       <div className="auth-form-row"><label className="remember-label"><input type="checkbox" defaultChecked /> Keep me signed in</label><button type="button" className="text-button" onClick={sendReset} disabled={busy}>Forgot password?</button></div>
       <button className="primary-button wide" type="submit" disabled={busy}>{busy ? "Signing in..." : "Sign in →"}</button>
+      <div className="auth-switch-line"><span>Don’t have an account?</span><button className="text-button" type="button" onClick={() => selectView("signup")}>Create one</button></div>
     </form>}
 
     {view === "signup" && <form className="auth-form" onSubmit={(event) => { event.preventDefault(); registerAccount(); }}>
+      <button className="auth-back-button" type="button" onClick={() => selectView("code")}>← Back to sign in</button>
       <div className="eyebrow lime">NEW OPERATOR ACCOUNT</div>
       <h2>Create your account</h2>
-      <p>Register an operator identity for saved profiles and protected telemetry.</p>
+      <p>Register once, then use a six-digit email code or your password to sign in.</p>
       <label className="auth-field"><span>Full name</span><input className="auth-input" value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Your full name" autoComplete="name" required /></label>
       <label className="auth-field"><span>Email address</span><input className="auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" autoComplete="email" required /></label>
       <label className="auth-field"><span>Password</span><div className="password-input-wrap"><input className="auth-input" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Minimum 8 characters" autoComplete="new-password" minLength={8} required /><button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? "Hide" : "Show"}</button></div></label>
@@ -923,13 +955,6 @@ function AccountAccess({ onSignedIn, compact = false }: { onSignedIn: AuthComple
       <div className="password-strength"><i className={password.length >= 8 ? "complete" : ""} /><i className={password.length >= 10 ? "complete" : ""} /><i className={/[A-Z]/.test(password) && /\d/.test(password) ? "complete" : ""} /><span>{password.length < 8 ? "At least 8 characters" : password.length < 10 ? "Good password" : "Strong password"}</span></div>
       <button className="primary-button wide" type="submit" disabled={busy}>{busy ? "Creating account..." : "Create account →"}</button>
     </form>}
-
-    {view === "code" && <div className="auth-form">
-      <div className="eyebrow lime">PASSWORDLESS ACCESS</div>
-      <h2>{codeSent ? "Check your inbox" : "Sign in with a code"}</h2>
-      <p>{codeSent ? <>Enter the verification code sent to <strong>{email}</strong>.</> : "Use a one-time six-digit code for an existing account."}</p>
-      {!codeSent ? <><label className="auth-field"><span>Email address</span><input className="auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") requestCode(); }} placeholder="operator@example.com" autoComplete="email" /></label><button className="primary-button wide" onClick={requestCode} disabled={busy}>{busy ? "Sending..." : "Send verification code →"}</button></> : <><div className="code-grid" onPaste={pasteCode}>{codeDigits.map((digit, index) => <input id={(compact ? "modal-otp-" : "otp-") + index} key={index} className="code-cell" type="text" inputMode="numeric" maxLength={1} value={digit} onChange={(event) => updateDigit(index, event.target.value)} onKeyDown={(event) => { if (event.key === "Backspace" && !digit && index > 0) document.getElementById((compact ? "modal-otp-" : "otp-") + (index - 1))?.focus(); if (event.key === "Enter") verifyCode(); }} aria-label={"Verification digit " + (index + 1)} autoComplete={index === 0 ? "one-time-code" : "off"} />)}</div><button className="primary-button wide" onClick={verifyCode} disabled={busy}>{busy ? "Verifying..." : "Verify & enter workspace →"}</button><div className="auth-inline-actions"><button className="text-button" onClick={() => { setCodeSent(false); setCodeDigits(Array(6).fill("")); setMessage(""); }}>Change email</button><button className="text-button" onClick={requestCode} disabled={busy}>Resend code</button></div></>}
-    </div>}
 
     {message && <div className={"auth-message " + messageTone} role="status" aria-live="polite">{message}</div>}
     <small className="auth-safety">Authentication grants access to saved data only. Aircraft actuator control remains onboard.</small>
