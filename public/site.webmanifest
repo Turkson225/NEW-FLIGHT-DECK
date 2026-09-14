@@ -1,0 +1,17 @@
+{
+  "name": "FLIGHT DECK Aerospace Operations",
+  "short_name": "FLIGHT DECK",
+  "description": "Fixed-wing aircraft telemetry and operations console",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0d120f",
+  "theme_color": "#101711",
+  "icons": [
+    {
+      "src": "flight-deck-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
