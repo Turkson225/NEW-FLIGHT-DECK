@@ -471,6 +471,117 @@ function Settings({ onAction, accountEmail }: { onAction: (message: string) => v
   return <><div className="settings-page-head"><PageIntro eyebrow="FLIGHT OPERATIONS / DEMO" title="Profiles & settings" text="Aircraft identity, saved configuration and integration." /><div className="settings-toolbar"><button className="select-button" onClick={() => onAction("Gentle roll and pitch preset selected")}>Gentle roll & pitch <span>⌄</span></button><button className="outline-button" onClick={() => onAction("Configuration saved locally for this session")}>▣ Save changes</button><button className="primary-button" onClick={() => onAction("Session recording started")}>● Record session</button></div></div><div className="settings-tabs">{tabs.map((item) => <button key={item} className={tab === item ? "selected" : ""} onClick={() => { setTab(item); onAction(item + " selected"); }}>{item}</button>)}</div>{tab === "Aircraft profiles" ? <section className="settings-reference-grid"><Panel eyebrow="AIRCRAFT CONFIGURATION" title="Aircraft configuration"><div className="settings-field"><label>Aircraft name</label><input className="settings-input" value={aircraftName} onChange={(event) => setAircraftName(event.target.value)} /></div><div className="settings-field"><label>Aircraft ID</label><input className="settings-input" value={aircraftId} onChange={(event) => setAircraftId(event.target.value.toUpperCase())} /><small>Must match the provisioned gateway ID.</small></div><button className="select-button settings-select" onClick={() => onAction("Telemetry rate: 10 Hz standard dashboard")}>10 Hz · standard dashboard <span>⌄</span></button><div className="setting-toggle-row"><span>Browser test tone · separate from voice</span><button className="toggle on" onClick={() => onAction("Browser test tone toggled")}><i /></button></div><button className="outline-button wide" onClick={() => onAction("Browser test tone played")}>Test browser tone</button></Panel><Panel eyebrow="SAVED PROFILES" title="Saved profiles"><div className="settings-field"><label>Profile name</label><input className="settings-input" value={profileName} onChange={(event) => setProfileName(event.target.value)} /></div><button className="primary-button wide" onClick={() => onAction("Saved profile: " + profileName)}>Save named profile</button><div className="saved-profile"><strong>Falcon 01 · v1</strong><button className="text-button" onClick={() => onAction("Falcon 01 profile loaded")}>Load</button></div><button className="outline-button wide" onClick={() => onAction("Configuration export prepared")}>⇩ Export configuration</button></Panel></section> : <section className="settings-reference-grid"><Panel eyebrow={tab.toUpperCase()} title={tab}><div className="settings-tab-notice"><span>◇</span><div><strong>{tab} workspace</strong><p>This area is ready for the same aircraft profile, access, and wiring workflows shown in the reference console.</p><button className="primary-button" onClick={() => onAction(tab + " workflow opened")}>Open {tab.toLowerCase()} →</button></div></div></Panel><Panel eyebrow="CLOUD CONNECTION" title="Supabase gateway"><Setting label="Project" value="Existing FLIGHT-DECK backend" /><Setting label="Session" value={accountEmail ?? "Sign in required"} /><Setting label="Device ingest" value="Server-authenticated" /></Panel></section>}</>;
 }
 
+function AuthLoading() {
+  return <div className="auth-screen auth-loading"><div className="auth-brand-mark">✈</div><div className="eyebrow lime">FLIGHT DECK</div><span>Preparing secure operator access…</span></div>;
+}
+
+function AuthScreen({ onDemo, onSignedIn }: { onDemo: () => void; onSignedIn: (email: string) => void }) {
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [codeSent, setCodeSent] = useState(false);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const requestCode = async () => {
+    if (!email.trim()) {
+      setMessage("Enter your operator email address.");
+      return;
+    }
+    setBusy(true);
+    const error = await sendMagicLink(email.trim());
+    setBusy(false);
+    if (error) {
+      setMessage(error);
+    } else {
+      setCodeSent(true);
+      setMessage("Enter the 6-digit code sent to your inbox.");
+    }
+  };
+
+  const verifyCode = async () => {
+    if (code.length !== 6) {
+      setMessage("Enter all 6 digits.");
+      return;
+    }
+    setBusy(true);
+    const result = await verifyEmailCode(email.trim(), code);
+    setBusy(false);
+    if (result.error) setMessage(result.error);
+    else onSignedIn(result.email);
+  };
+
+  const updateDigit = (index: number, value: string) => {
+    const digit = value.replace(/\D/g, "").slice(-1);
+    setCode((current) => current.substring(0, index) + digit + current.substring(index + 1));
+  };
+
+  return <div className="auth-screen">
+    <div className="auth-hero">
+      <div className="auth-brand"><span className="auth-logo">✈</span><strong>FLIGHT DECK</strong></div>
+      <div className="eyebrow lime">FIXED-WING OPERATIONS</div>
+      <h1>Clarity on every<br /><em>control surface.</em></h1>
+      <p>One workspace for aircraft telemetry, radio diagnostics, and deliberate preflight checks.</p>
+      <div className="auth-aircraft"><span className="auth-plane">✈</span><small>LOCAL CONTROL FIRST</small></div>
+      <div className="auth-footer">♢ Physical radio control and aircraft failsafes stay onboard.</div>
+    </div>
+    <section className="auth-card">
+      <div className="auth-card-icon">✉</div>
+      {!codeSent ? <><div className="eyebrow lime">SECURE OPERATOR ACCESS</div><h2>Sign in to Flight Deck</h2><p>Enter your email to receive a one-time verification code.</p><input className="auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" autoComplete="email" /><button className="primary-button wide" onClick={requestCode} disabled={busy}>{busy ? "Sending..." : "Send verification code →"}</button></> : <><div className="eyebrow lime">SECURE OPERATOR ACCESS</div><h2>Check your inbox</h2><p>Enter the verification code sent to <strong>{email}</strong>.</p><div className="code-grid">{Array.from({ length: 6 }, (_, index) => <input key={index} className="code-cell" type="text" inputMode="numeric" maxLength={1} value={code[index] ?? ""} onChange={(event) => updateDigit(index, event.target.value)} aria-label={"Verification digit " + (index + 1)} />)}</div><button className="primary-button wide" onClick={verifyCode} disabled={busy}>{busy ? "Verifying..." : "Verify & enter workspace →"}</button><div className="auth-inline-actions"><button className="text-button" onClick={() => { setCodeSent(false); setCode(""); setMessage(""); }}>Change email</button><button className="text-button" onClick={requestCode} disabled={busy}>Resend code</button></div></>}
+      {message && <div className="auth-message">{message}</div>}
+      <div className="auth-divider" />
+      <button className="outline-button wide" onClick={onDemo}>Explore the interactive demo</button>
+      <small className="auth-safety">Demo data is simulated. Protected aircraft data requires a verified account.</small>
+    </section>
+  </div>;
+}
+
+function SignInModal({ accountEmail, onClose, onSignedIn, onSignedOut }: { accountEmail: string | null; onClose: () => void; onSignedIn: (email: string) => void; onSignedOut: () => void }) {
+  const [email, setEmail] = useState("");
+  const [message, setMessage] = useState("");
+  const [code, setCode] = useState("");
+  const [codeSent, setCodeSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const requestLink = async () => {
+    if (!email.trim()) {
+      setMessage("Enter your operator email address.");
+      return;
+    }
+    setBusy(true);
+    const error = await sendMagicLink(email.trim());
+    setBusy(false);
+    setMessage(error ?? "A 6-digit verification code was sent to your email.");
+    if (!error) setCodeSent(true);
+  };
+
+  const verifyCode = async () => {
+    if (code.length !== 6) {
+      setMessage("Enter the full 6-digit code.");
+      return;
+    }
+    setBusy(true);
+    const result = await verifyEmailCode(email.trim(), code);
+    setBusy(false);
+    setMessage(result.error ?? "Verified successfully.");
+    if (!result.error) onSignedIn(result.email);
+  };
+
+  const signOut = async () => {
+    await supabase?.auth.signOut();
+    onSignedOut();
+    onClose();
+  };
+
+  return <div className="auth-backdrop" onClick={onClose}>
+    <section className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="sign-in-title" onClick={(event) => event.stopPropagation()}>
+      <button className="auth-close" onClick={onClose} aria-label="Close sign in">×</button>
+      <div className="eyebrow lime">FLIGHT DECK ACCESS</div>
+      <h2 id="sign-in-title">{accountEmail ? "Operator session" : "Sign in to Flight Deck"}</h2>
+      {accountEmail ? <><p className="auth-copy">Authenticated operator session</p><div className="auth-account"><span className="online-dot" />{accountEmail}</div><button className="primary-button wide" onClick={signOut}>Sign out</button></> : <><p className="auth-copy">Enter your email to receive a 6-digit Supabase verification code.</p><input className="auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" autoComplete="email" /><button className="primary-button wide" onClick={requestLink} disabled={busy}>{busy ? "Sending..." : codeSent ? "Resend code" : "Send 6-digit code →"}</button>{codeSent && <><input className="auth-input code-input" type="text" inputMode="numeric" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="123456" autoComplete="one-time-code" /><button className="outline-button wide" onClick={verifyCode} disabled={busy}>{busy ? "Verifying..." : "Verify code →"}</button></>}{message && <div className="auth-message">{message}</div>}<small className="auth-safety">The browser is read-only. Authentication does not enable actuator control.</small></>}
+    </section>
+  </div>;
+}
+
 function PageIntro({ eyebrow, title, text }: { eyebrow: string; title: string; text: string }) {
   return <div className="page-intro"><div className="eyebrow lime">{eyebrow}</div><h2>{title}</h2><p>{text}</p></div>;
 }
