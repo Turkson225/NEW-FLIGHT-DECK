@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type User } from "@supabase/supabase-js";
 
 const url = import.meta.env.VITE_SUPABASE_URL?.trim();
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim();
@@ -15,6 +15,36 @@ export const supabase = url && key
 
 export const supabaseConfigured = Boolean(supabase);
 
+export type AuthResult = {
+  error: string | null;
+  email: string;
+  name: string;
+  signedIn: boolean;
+  needsConfirmation: boolean;
+};
+
+function safeName(user: User | null, email: string): string {
+  const metadataName = user?.user_metadata?.full_name ?? user?.user_metadata?.display_name;
+  if (typeof metadataName === "string" && metadataName.trim()) return metadataName.trim();
+  const emailName = email.split("@")[0].replace(/[._-]+/g, " ").trim();
+  return emailName ? emailName.replace(/\b\w/g, (letter) => letter.toUpperCase()) : "Flight Deck Operator";
+}
+
+function authResult(user: User | null, fallbackEmail: string, signedIn: boolean, needsConfirmation = false): AuthResult {
+  const email = user?.email ?? fallbackEmail;
+  return {
+    error: null,
+    email,
+    name: safeName(user, email),
+    signedIn,
+    needsConfirmation,
+  };
+}
+
+function redirectUrl(): string {
+  return window.location.origin + window.location.pathname;
+}
+
 export function workspaceId(): string | undefined {
   return new URLSearchParams(window.location.search).get("workspace")
     || import.meta.env.VITE_WORKSPACE_ID
@@ -28,7 +58,7 @@ export async function cloudRequest(path: string, options?: RequestInit): Promise
 
   if (!supabase) {
     return Response.json(
-      { error: "Supabase is not configured. Add the new project URL and publishable key." },
+      { error: "Supabase is not configured. Add the project URL and publishable key." },
       { status: 503 },
     );
   }
@@ -51,7 +81,7 @@ export async function cloudRequest(path: string, options?: RequestInit): Promise
   });
 
   if (error) {
-    let detail = "Cloud request failed. Check the new Supabase deployment.";
+    let detail = "Cloud request failed. Check the Supabase deployment.";
     if (error.context instanceof Response) {
       try {
         detail = (await error.context.json()).error ?? detail;
@@ -65,22 +95,63 @@ export async function cloudRequest(path: string, options?: RequestInit): Promise
   return Response.json(data?.data ?? {}, { status: data?.status ?? 200 });
 }
 
+export async function createAccount(name: string, email: string, password: string): Promise<AuthResult> {
+  if (!supabase) return { error: "Supabase is not configured.", email, name, signedIn: false, needsConfirmation: false };
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: { full_name: name.trim(), display_name: name.trim() },
+      emailRedirectTo: redirectUrl(),
+    },
+  });
+  if (error) return { error: error.message, email, name, signedIn: false, needsConfirmation: false };
+  if (data.user?.identities?.length === 0) {
+    return { error: "An account already exists for this email. Sign in instead.", email, name, signedIn: false, needsConfirmation: false };
+  }
+  return authResult(data.user, email, Boolean(data.session), Boolean(data.user && !data.session));
+}
+
+export async function signInWithPassword(email: string, password: string): Promise<AuthResult> {
+  if (!supabase) return { error: "Supabase is not configured.", email, name: "", signedIn: false, needsConfirmation: false };
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) return { error: error.message, email, name: "", signedIn: false, needsConfirmation: false };
+  return authResult(data.user, email, Boolean(data.session));
+}
+
 export async function sendMagicLink(email: string): Promise<string | null> {
   if (!supabase) return "Supabase is not configured.";
   const { error } = await supabase.auth.signInWithOtp({
     email,
-    options: { emailRedirectTo: window.location.href },
+    options: {
+      emailRedirectTo: redirectUrl(),
+      shouldCreateUser: false,
+    },
   });
   return error?.message ?? null;
 }
 
-
-export async function verifyEmailCode(email: string, token: string): Promise<{ error: string | null; email: string }> {
-  if (!supabase) return { error: "Supabase is not configured.", email };
+export async function verifyEmailCode(email: string, token: string): Promise<AuthResult> {
+  if (!supabase) return { error: "Supabase is not configured.", email, name: "", signedIn: false, needsConfirmation: false };
   const { data, error } = await supabase.auth.verifyOtp({
     email,
     token,
     type: "email",
   });
-  return { error: error?.message ?? null, email: data.user?.email ?? email };
+  if (error) return { error: error.message, email, name: "", signedIn: false, needsConfirmation: false };
+  return authResult(data.user, email, Boolean(data.session));
+}
+
+export async function requestPasswordReset(email: string): Promise<string | null> {
+  if (!supabase) return "Supabase is not configured.";
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: redirectUrl(),
+  });
+  return error?.message ?? null;
+}
+
+export async function updatePassword(password: string): Promise<string | null> {
+  if (!supabase) return "Supabase is not configured.";
+  const { error } = await supabase.auth.updateUser({ password });
+  return error?.message ?? null;
 }

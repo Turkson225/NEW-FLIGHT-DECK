@@ -1,13 +1,26 @@
 import { useEffect, useMemo, useState, type ClipboardEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
-import { cloudRequest, sendMagicLink, supabase, supabaseConfigured, verifyEmailCode } from "./lib/supabase";
+import { cloudRequest, createAccount, requestPasswordReset, sendMagicLink, signInWithPassword, supabase, supabaseConfigured, updatePassword, verifyEmailCode } from "./lib/supabase";
 
 type Page = "overview" | "monitor" | "mixer" | "modes" | "sensors" | "power" | "radio" | "preflight" | "replay" | "settings";
 type Mode = "DEMO" | "LIVE" | "REPLAY";
 type ChartKey = "link" | "acceleration" | "angular";
 
 const assetUrl = (name: string) => `${import.meta.env.BASE_URL}${name}`;
+
+function accountNameFor(email: string | null, metadata?: Record<string, unknown>): string | null {
+  if (!email) return null;
+  const metadataName = metadata?.full_name ?? metadata?.display_name;
+  if (typeof metadataName === "string" && metadataName.trim()) return metadataName.trim();
+  const emailName = email.split("@")[0].replace(/[._-]+/g, " ").trim();
+  return emailName ? emailName.replace(/\b\w/g, (letter) => letter.toUpperCase()) : "Flight Deck Operator";
+}
+
+function initialsFor(name: string | null): string {
+  if (!name) return "DM";
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+}
 
 type Telemetry = {
   timestamp: string;
@@ -100,6 +113,8 @@ function App() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   const [accountEmail, setAccountEmail] = useState<string | null>(null);
+  const [accountName, setAccountName] = useState<string | null>(null);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [authReady, setAuthReady] = useState(!supabaseConfigured);
   const [demoAccess, setDemoAccess] = useState(false);
   const [mode, setMode] = useState<Mode>("DEMO");
@@ -131,14 +146,19 @@ function App() {
     let active = true;
     supabase.auth.getUser().then(({ data }) => {
       if (active) {
-        setAccountEmail(data.user?.email ?? null);
+        const email = data.user?.email ?? null;
+        setAccountEmail(email);
+        setAccountName(accountNameFor(email, data.user?.user_metadata));
         setAuthReady(true);
       }
     }).catch(() => {
       if (active) setAuthReady(true);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAccountEmail(session?.user?.email ?? null);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      const email = session?.user?.email ?? null;
+      setAccountEmail(email);
+      setAccountName(accountNameFor(email, session?.user?.user_metadata));
+      if (event === "PASSWORD_RECOVERY") setRecoveryOpen(true);
       setAuthReady(true);
     });
     return () => {
@@ -246,7 +266,7 @@ function App() {
   if (!accountEmail && !demoAccess) {
     return <AuthScreen
       onDemo={() => { setDemoAccess(true); setToast("DEMO simulator active"); }}
-      onSignedIn={(email) => { setAccountEmail(email); setDemoAccess(false); setToast("Signed in successfully"); }}
+      onSignedIn={(email, name) => { setAccountEmail(email); setAccountName(name ?? accountNameFor(email)); setDemoAccess(false); setToast("Signed in successfully"); }}
     />;
   }
 
@@ -303,8 +323,8 @@ function App() {
             <div className="health-bars"><i /><i /><i /><i /><i /></div>
           </div>
           <div className="operator">
-            <div className="operator-avatar">ET</div>
-            <div><strong>Ennis Turkson</strong><span>Owner · verified</span></div>
+            <div className="operator-avatar">{initialsFor(accountName)}</div>
+            <div><strong>{accountName ?? "Demo operator"}</strong><span>{accountEmail ? "Verified operator" : "Interactive demo"}</span></div>
             <span className="operator-more">•••</span>
           </div>
         </div>
@@ -318,7 +338,7 @@ function App() {
             <h1>{pageTitles[page]}</h1>
           </div>
           <div className="topbar-right">
-            {accountEmail ? <><div className="verified-pill"><span className="online-dot" /> Verified account · {accountEmail}</div><button className="signout-button" onClick={async () => { await supabase?.auth.signOut(); setAccountEmail(null); setDemoAccess(false); setToast("Signed out"); }}>Sign out</button></> : <button className="verified-pill signin-trigger" onClick={() => setAuthOpen(true)}><span className="status-led orange" /> Sign in</button>}
+            {accountEmail ? <><div className="verified-pill"><span className="online-dot" /> Verified account · {accountEmail}</div><button className="signout-button" onClick={async () => { await supabase?.auth.signOut(); setAccountEmail(null); setAccountName(null); setDemoAccess(false); setToast("Signed out"); }}>Sign out</button></> : <button className="verified-pill signin-trigger" onClick={() => setAuthOpen(true)}><span className="status-led orange" /> Sign in</button>}
             <button className="command-trigger" onClick={() => setCommandOpen(true)} aria-label="Open command center"><span>Search</span><kbd>⌘ K</kbd></button>
             <div className="mode-control">
               {(["DEMO", "LIVE", "REPLAY"] as Mode[]).map((item) => (
@@ -329,7 +349,7 @@ function App() {
               <span className={recording ? "record-dot pulse" : "record-dot"} /> {recording ? "Recording" : "Record"}
             </button>
             <button className={notifications ? "top-icon-button selected" : "top-icon-button"} onClick={() => setNotifications(!notifications)} aria-label="Notifications">♢</button>
-            <div className="top-avatar">ET</div>
+            <button className="top-avatar" onClick={() => setAuthOpen(true)} aria-label="Open operator account">{initialsFor(accountName)}</button>
           </div>
         </header>
 
@@ -344,7 +364,8 @@ function App() {
             <div className="command-footer"><span><kbd>↑</kbd><kbd>↓</kbd> browse</span><span><kbd>esc</kbd> close</span><strong>FLIGHT DECK / COMMAND</strong></div>
           </section>
         </div>}
-        {authOpen && <SignInModal accountEmail={accountEmail} onClose={() => setAuthOpen(false)} onSignedIn={(email) => { setAccountEmail(email); setDemoAccess(false); setAuthOpen(false); notify("Signed in successfully"); }} onSignedOut={() => { setAccountEmail(null); notify("Signed out"); }} />}
+        {authOpen && <SignInModal accountEmail={accountEmail} accountName={accountName} onClose={() => setAuthOpen(false)} onSignedIn={(email, name) => { setAccountEmail(email); setAccountName(name ?? accountNameFor(email)); setDemoAccess(false); setAuthOpen(false); notify("Signed in successfully"); }} onSignedOut={() => { setAccountEmail(null); setAccountName(null); setDemoAccess(false); notify("Signed out"); }} />}
+        {recoveryOpen && <PasswordRecoveryModal onClose={() => setRecoveryOpen(false)} onComplete={() => { setRecoveryOpen(false); notify("Password updated successfully"); }} />}
           <div className="content">
           <div className="context-bar">
             <div className="context-status"><span className={liveStatus === "connected" ? "status-led green" : "status-led orange"} /><strong>{liveStatusLabel(liveStatus)}</strong><span>Falcon 01 · FD-001</span></div>
@@ -574,48 +595,140 @@ function AuthLoading() {
   return <div className="auth-screen auth-loading"><div className="auth-brand-mark"><img src={assetUrl("flight-deck-mark.svg")} alt="" /></div><div className="eyebrow lime">FLIGHT DECK</div><span>Preparing secure operator access…</span></div>;
 }
 
-function AuthScreen({ onDemo, onSignedIn }: { onDemo: () => void; onSignedIn: (email: string) => void }) {
+type AuthView = "signin" | "signup" | "code";
+type AuthComplete = (email: string, name?: string) => void;
+
+function AccountAccess({ onSignedIn, compact = false }: { onSignedIn: AuthComplete; compact?: boolean }) {
+  const [view, setView] = useState<AuthView>("signin");
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [codeDigits, setCodeDigits] = useState<string[]>(Array(6).fill(""));
   const [codeSent, setCodeSent] = useState(false);
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "error" | "info">("info");
   const [busy, setBusy] = useState(false);
+
+  const selectView = (next: AuthView) => {
+    setView(next);
+    setMessage("");
+    setCodeSent(false);
+    setCodeDigits(Array(6).fill(""));
+  };
+
+  const passwordSignIn = async () => {
+    if (!email.trim() || !password) {
+      setMessageTone("error");
+      setMessage("Enter your email and password.");
+      return;
+    }
+    setBusy(true);
+    const result = await signInWithPassword(email.trim(), password);
+    setBusy(false);
+    if (result.error) {
+      setMessageTone("error");
+      setMessage(result.error);
+    } else if (result.signedIn) {
+      onSignedIn(result.email, result.name);
+    }
+  };
+
+  const registerAccount = async () => {
+    if (fullName.trim().length < 2) {
+      setMessageTone("error");
+      setMessage("Enter the account holder’s full name.");
+      return;
+    }
+    if (!email.trim()) {
+      setMessageTone("error");
+      setMessage("Enter a valid email address.");
+      return;
+    }
+    if (password.length < 8) {
+      setMessageTone("error");
+      setMessage("Use at least 8 characters for the password.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setMessageTone("error");
+      setMessage("The passwords do not match.");
+      return;
+    }
+    setBusy(true);
+    const result = await createAccount(fullName.trim(), email.trim(), password);
+    setBusy(false);
+    if (result.error) {
+      setMessageTone("error");
+      setMessage(result.error);
+    } else if (result.signedIn) {
+      onSignedIn(result.email, result.name);
+    } else {
+      setView("signin");
+      setPassword("");
+      setConfirmPassword("");
+      setMessageTone("success");
+      setMessage("Account created. Check your inbox to confirm your email, then sign in.");
+    }
+  };
 
   const requestCode = async () => {
     if (!email.trim()) {
-      setMessage("Enter your operator email address.");
+      setMessageTone("error");
+      setMessage("Enter the email address for your account.");
       return;
     }
     setBusy(true);
     const error = await sendMagicLink(email.trim());
     setBusy(false);
     if (error) {
+      setMessageTone("error");
       setMessage(error);
     } else {
       setCodeDigits(Array(6).fill(""));
       setCodeSent(true);
+      setMessageTone("info");
       setMessage("Enter the 6-digit code sent to your inbox.");
-      window.setTimeout(() => document.getElementById("otp-0")?.focus(), 80);
+      window.setTimeout(() => document.getElementById(compact ? "modal-otp-0" : "otp-0")?.focus(), 80);
     }
   };
 
   const verifyCode = async () => {
     const code = codeDigits.join("");
     if (code.length !== 6) {
+      setMessageTone("error");
       setMessage("Enter all 6 digits.");
       return;
     }
     setBusy(true);
     const result = await verifyEmailCode(email.trim(), code);
     setBusy(false);
-    if (result.error) setMessage(result.error);
-    else onSignedIn(result.email);
+    if (result.error) {
+      setMessageTone("error");
+      setMessage(result.error);
+    } else if (result.signedIn) {
+      onSignedIn(result.email, result.name);
+    }
+  };
+
+  const sendReset = async () => {
+    if (!email.trim()) {
+      setMessageTone("error");
+      setMessage("Enter your email first, then choose Forgot password.");
+      return;
+    }
+    setBusy(true);
+    const error = await requestPasswordReset(email.trim());
+    setBusy(false);
+    setMessageTone(error ? "error" : "success");
+    setMessage(error ?? "Password-reset link sent. Check your inbox.");
   };
 
   const updateDigit = (index: number, value: string) => {
     const digit = value.replace(/\D/g, "").slice(-1);
     setCodeDigits((current) => current.map((item, itemIndex) => itemIndex === index ? digit : item));
-    if (digit && index < 5) document.getElementById("otp-" + (index + 1))?.focus();
+    if (digit && index < 5) document.getElementById((compact ? "modal-otp-" : "otp-") + (index + 1))?.focus();
   };
 
   const pasteCode = (event: ClipboardEvent<HTMLDivElement>) => {
@@ -623,9 +736,51 @@ function AuthScreen({ onDemo, onSignedIn }: { onDemo: () => void; onSignedIn: (e
     if (!digits) return;
     event.preventDefault();
     setCodeDigits(Array.from({ length: 6 }, (_, index) => digits[index] ?? ""));
-    document.getElementById("otp-" + Math.min(digits.length, 5))?.focus();
+    document.getElementById((compact ? "modal-otp-" : "otp-") + Math.min(digits.length, 5))?.focus();
   };
 
+  return <div className={compact ? "account-access compact" : "account-access"}>
+    <div className="auth-tabs" role="tablist" aria-label="Account access options">
+      <button role="tab" aria-selected={view === "signin"} className={view === "signin" ? "selected" : ""} onClick={() => selectView("signin")}>Sign in</button>
+      <button role="tab" aria-selected={view === "signup"} className={view === "signup" ? "selected" : ""} onClick={() => selectView("signup")}>Create account</button>
+      <button role="tab" aria-selected={view === "code"} className={view === "code" ? "selected" : ""} onClick={() => selectView("code")}>Email code</button>
+    </div>
+
+    {view === "signin" && <form className="auth-form" onSubmit={(event) => { event.preventDefault(); passwordSignIn(); }}>
+      <div className="eyebrow lime">SECURE OPERATOR ACCESS</div>
+      <h2>Welcome back</h2>
+      <p>Sign in to open your protected aircraft workspace.</p>
+      <label className="auth-field"><span>Email address</span><input className="auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" autoComplete="email" required /></label>
+      <label className="auth-field"><span>Password</span><div className="password-input-wrap"><input className="auth-input" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" autoComplete="current-password" required /><button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? "Hide" : "Show"}</button></div></label>
+      <div className="auth-form-row"><label className="remember-label"><input type="checkbox" defaultChecked /> Keep me signed in</label><button type="button" className="text-button" onClick={sendReset} disabled={busy}>Forgot password?</button></div>
+      <button className="primary-button wide" type="submit" disabled={busy}>{busy ? "Signing in..." : "Sign in →"}</button>
+    </form>}
+
+    {view === "signup" && <form className="auth-form" onSubmit={(event) => { event.preventDefault(); registerAccount(); }}>
+      <div className="eyebrow lime">NEW OPERATOR ACCOUNT</div>
+      <h2>Create your account</h2>
+      <p>Register an operator identity for saved profiles and protected telemetry.</p>
+      <label className="auth-field"><span>Full name</span><input className="auth-input" value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Your full name" autoComplete="name" required /></label>
+      <label className="auth-field"><span>Email address</span><input className="auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" autoComplete="email" required /></label>
+      <label className="auth-field"><span>Password</span><div className="password-input-wrap"><input className="auth-input" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Minimum 8 characters" autoComplete="new-password" minLength={8} required /><button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? "Hide" : "Show"}</button></div></label>
+      <label className="auth-field"><span>Confirm password</span><input className="auth-input" type={showPassword ? "text" : "password"} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Repeat your password" autoComplete="new-password" minLength={8} required /></label>
+      <div className="password-strength"><i className={password.length >= 8 ? "complete" : ""} /><i className={password.length >= 10 ? "complete" : ""} /><i className={/[A-Z]/.test(password) && /\d/.test(password) ? "complete" : ""} /><span>{password.length < 8 ? "At least 8 characters" : password.length < 10 ? "Good password" : "Strong password"}</span></div>
+      <button className="primary-button wide" type="submit" disabled={busy}>{busy ? "Creating account..." : "Create account →"}</button>
+    </form>}
+
+    {view === "code" && <div className="auth-form">
+      <div className="eyebrow lime">PASSWORDLESS ACCESS</div>
+      <h2>{codeSent ? "Check your inbox" : "Sign in with a code"}</h2>
+      <p>{codeSent ? <>Enter the verification code sent to <strong>{email}</strong>.</> : "Use a one-time six-digit code for an existing account."}</p>
+      {!codeSent ? <><label className="auth-field"><span>Email address</span><input className="auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") requestCode(); }} placeholder="operator@example.com" autoComplete="email" /></label><button className="primary-button wide" onClick={requestCode} disabled={busy}>{busy ? "Sending..." : "Send verification code →"}</button></> : <><div className="code-grid" onPaste={pasteCode}>{codeDigits.map((digit, index) => <input id={(compact ? "modal-otp-" : "otp-") + index} key={index} className="code-cell" type="text" inputMode="numeric" maxLength={1} value={digit} onChange={(event) => updateDigit(index, event.target.value)} onKeyDown={(event) => { if (event.key === "Backspace" && !digit && index > 0) document.getElementById((compact ? "modal-otp-" : "otp-") + (index - 1))?.focus(); if (event.key === "Enter") verifyCode(); }} aria-label={"Verification digit " + (index + 1)} autoComplete={index === 0 ? "one-time-code" : "off"} />)}</div><button className="primary-button wide" onClick={verifyCode} disabled={busy}>{busy ? "Verifying..." : "Verify & enter workspace →"}</button><div className="auth-inline-actions"><button className="text-button" onClick={() => { setCodeSent(false); setCodeDigits(Array(6).fill("")); setMessage(""); }}>Change email</button><button className="text-button" onClick={requestCode} disabled={busy}>Resend code</button></div></>}
+    </div>}
+
+    {message && <div className={"auth-message " + messageTone} role="status" aria-live="polite">{message}</div>}
+    <small className="auth-safety">Authentication grants access to saved data only. Aircraft actuator control remains onboard.</small>
+  </div>;
+}
+
+function AuthScreen({ onDemo, onSignedIn }: { onDemo: () => void; onSignedIn: AuthComplete }) {
   return <div className="auth-screen">
     <div className="auth-hero">
       <div className="auth-brand"><span className="auth-logo"><img src={assetUrl("flight-deck-mark.svg")} alt="" /></span><strong>FLIGHT DECK</strong></div>
@@ -636,46 +791,16 @@ function AuthScreen({ onDemo, onSignedIn }: { onDemo: () => void; onSignedIn: (e
       <div className="auth-footer">♢ Physical radio control and aircraft failsafes stay onboard.</div>
     </div>
     <section className="auth-card">
-      <div className="auth-card-icon">✉</div>
-      {!codeSent ? <><div className="eyebrow lime">SECURE OPERATOR ACCESS</div><h2>Sign in to Flight Deck</h2><p>Enter your email to receive a one-time verification code.</p><input className="auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") requestCode(); }} placeholder="operator@example.com" autoComplete="email" /><button className="primary-button wide" onClick={requestCode} disabled={busy}>{busy ? "Sending..." : "Send verification code →"}</button></> : <><div className="eyebrow lime">SECURE OPERATOR ACCESS</div><h2>Check your inbox</h2><p>Enter the verification code sent to <strong>{email}</strong>.</p><div className="code-grid" onPaste={pasteCode}>{codeDigits.map((digit, index) => <input id={"otp-" + index} key={index} className="code-cell" type="text" inputMode="numeric" maxLength={1} value={digit} onChange={(event) => updateDigit(index, event.target.value)} onKeyDown={(event) => { if (event.key === "Backspace" && !digit && index > 0) document.getElementById("otp-" + (index - 1))?.focus(); if (event.key === "Enter") verifyCode(); }} aria-label={"Verification digit " + (index + 1)} autoComplete={index === 0 ? "one-time-code" : "off"} />)}</div><button className="primary-button wide" onClick={verifyCode} disabled={busy}>{busy ? "Verifying..." : "Verify & enter workspace →"}</button><div className="auth-inline-actions"><button className="text-button" onClick={() => { setCodeSent(false); setCodeDigits(Array(6).fill("")); setMessage(""); }}>Change email</button><button className="text-button" onClick={requestCode} disabled={busy}>Resend code</button></div></>}
-      {message && <div className="auth-message">{message}</div>}
+      <div className="auth-card-icon">✦</div>
+      <AccountAccess onSignedIn={onSignedIn} />
       <div className="auth-divider" />
       <button className="outline-button wide" onClick={onDemo}>Explore the interactive demo</button>
-      <small className="auth-safety">Demo data is simulated. Protected aircraft data requires a verified account.</small>
+      <small className="auth-safety auth-demo-note">Demo data is simulated. Protected aircraft data requires an account.</small>
     </section>
   </div>;
 }
-function SignInModal({ accountEmail, onClose, onSignedIn, onSignedOut }: { accountEmail: string | null; onClose: () => void; onSignedIn: (email: string) => void; onSignedOut: () => void }) {
-  const [email, setEmail] = useState("");
-  const [message, setMessage] = useState("");
-  const [code, setCode] = useState("");
-  const [codeSent, setCodeSent] = useState(false);
-  const [busy, setBusy] = useState(false);
 
-  const requestLink = async () => {
-    if (!email.trim()) {
-      setMessage("Enter your operator email address.");
-      return;
-    }
-    setBusy(true);
-    const error = await sendMagicLink(email.trim());
-    setBusy(false);
-    setMessage(error ?? "A 6-digit verification code was sent to your email.");
-    if (!error) setCodeSent(true);
-  };
-
-  const verifyCode = async () => {
-    if (code.length !== 6) {
-      setMessage("Enter the full 6-digit code.");
-      return;
-    }
-    setBusy(true);
-    const result = await verifyEmailCode(email.trim(), code);
-    setBusy(false);
-    setMessage(result.error ?? "Verified successfully.");
-    if (!result.error) onSignedIn(result.email);
-  };
-
+function SignInModal({ accountEmail, accountName, onClose, onSignedIn, onSignedOut }: { accountEmail: string | null; accountName: string | null; onClose: () => void; onSignedIn: AuthComplete; onSignedOut: () => void }) {
   const signOut = async () => {
     await supabase?.auth.signOut();
     onSignedOut();
@@ -683,11 +808,44 @@ function SignInModal({ accountEmail, onClose, onSignedIn, onSignedOut }: { accou
   };
 
   return <div className="auth-backdrop" onClick={onClose}>
-    <section className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="sign-in-title" onClick={(event) => event.stopPropagation()}>
-      <button className="auth-close" onClick={onClose} aria-label="Close sign in">×</button>
-      <div className="eyebrow lime">FLIGHT DECK ACCESS</div>
-      <h2 id="sign-in-title">{accountEmail ? "Operator session" : "Sign in to Flight Deck"}</h2>
-      {accountEmail ? <><p className="auth-copy">Authenticated operator session</p><div className="auth-account"><span className="online-dot" />{accountEmail}</div><button className="primary-button wide" onClick={signOut}>Sign out</button></> : <><p className="auth-copy">Enter your email to receive a 6-digit Supabase verification code.</p><input className="auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" autoComplete="email" /><button className="primary-button wide" onClick={requestLink} disabled={busy}>{busy ? "Sending..." : codeSent ? "Resend code" : "Send 6-digit code →"}</button>{codeSent && <><input className="auth-input code-input" type="text" inputMode="numeric" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="123456" autoComplete="one-time-code" /><button className="outline-button wide" onClick={verifyCode} disabled={busy}>{busy ? "Verifying..." : "Verify code →"}</button></>}{message && <div className="auth-message">{message}</div>}<small className="auth-safety">The browser is read-only. Authentication does not enable actuator control.</small></>}
+    <section className={accountEmail ? "auth-modal session-modal" : "auth-modal access-modal"} role="dialog" aria-modal="true" aria-labelledby="account-dialog-title" onClick={(event) => event.stopPropagation()}>
+      <button className="auth-close" onClick={onClose} aria-label="Close account window">×</button>
+      {accountEmail ? <><div className="eyebrow lime">FLIGHT DECK ACCOUNT</div><h2 id="account-dialog-title">Operator session</h2><div className="auth-account-profile"><div className="operator-avatar large-avatar">{initialsFor(accountName)}</div><div><strong>{accountName ?? accountNameFor(accountEmail)}</strong><span>{accountEmail}</span></div><i>VERIFIED</i></div><div className="session-security"><Setting label="Authentication" value="Supabase secure session" /><Setting label="Workspace access" value="Protected telemetry" /><Setting label="Aircraft commands" value="Browser disabled" /></div><button className="primary-button wide" onClick={signOut}>Sign out</button></> : <><div className="modal-brand-line"><img src={assetUrl("flight-deck-mark.svg")} alt="" /><div><span>FLIGHT DECK</span><small>OPERATOR ACCESS</small></div></div><h2 id="account-dialog-title" className="visually-hidden">Flight Deck account access</h2><AccountAccess compact onSignedIn={onSignedIn} /></>}
+    </section>
+  </div>;
+}
+
+function PasswordRecoveryModal({ onClose, onComplete }: { onClose: () => void; onComplete: () => void }) {
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const savePassword = async () => {
+    if (password.length < 8) {
+      setMessage("Use at least 8 characters.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setMessage("The passwords do not match.");
+      return;
+    }
+    setBusy(true);
+    const error = await updatePassword(password);
+    setBusy(false);
+    if (error) setMessage(error);
+    else onComplete();
+  };
+
+  return <div className="auth-backdrop recovery-backdrop">
+    <section className="auth-modal recovery-modal" role="dialog" aria-modal="true" aria-labelledby="recovery-title">
+      <button className="auth-close" onClick={onClose} aria-label="Close password reset">×</button>
+      <div className="auth-card-icon">◇</div><div className="eyebrow lime">ACCOUNT RECOVERY</div><h2 id="recovery-title">Choose a new password</h2><p className="auth-copy">Your recovery link is verified. Set a new password for this operator account.</p>
+      <label className="auth-field"><span>New password</span><div className="password-input-wrap"><input className="auth-input" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" minLength={8} /><button onClick={() => setShowPassword(!showPassword)}>{showPassword ? "Hide" : "Show"}</button></div></label>
+      <label className="auth-field"><span>Confirm new password</span><input className="auth-input" type={showPassword ? "text" : "password"} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={8} /></label>
+      {message && <div className="auth-message error" role="status">{message}</div>}
+      <button className="primary-button wide" onClick={savePassword} disabled={busy}>{busy ? "Updating..." : "Update password →"}</button>
     </section>
   </div>;
 }
