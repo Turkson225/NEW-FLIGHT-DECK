@@ -283,7 +283,7 @@ function Overview(props: {
         <Kpi icon="⌁" label="TELEMETRY" value="LIVE DEMO" detail={telemetry.timestamp} accent="lime" trend="+ stable" />
         <Kpi icon="◉" label="LINK QUALITY" value={Math.round(telemetry.link) + "%"} detail="nRF24 status · nominal" accent="blue" trend="+4.2%" />
         <Kpi icon="▣" label="AIRCRAFT BATTERY" value={telemetry.voltage.toFixed(2) + " V"} detail={Math.round(telemetry.battery) + "% estimated"} accent="orange" trend="- 0.2 V" />
-        <Kpi icon="◒" label="ATTITUDE" value={telemetry.pitch.toFixed(1) + "°"} detail="Pitch · Roll " + telemetry.roll.toFixed(1) + "°" accent="violet" trend="steady" />
+        <Kpi icon="◒" label="ATTITUDE" value={telemetry.pitch.toFixed(1) + "°"} detail={"Pitch · Roll " + telemetry.roll.toFixed(1) + "°"} accent="violet" trend="steady" />
         <Kpi icon="◇" label="CONTROL PATH" value="LOCKED" detail="Local receiver owns control" accent="red" trend="protected" />
       </section>
 
@@ -415,4 +415,3 @@ function Setting({ label, value }: { label: string; value: string }) {
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
-
