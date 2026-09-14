@@ -73,3 +73,14 @@ export async function sendMagicLink(email: string): Promise<string | null> {
   });
   return error?.message ?? null;
 }
+
+
+export async function verifyEmailCode(email: string, token: string): Promise<{ error: string | null; email: string }> {
+  if (!supabase) return { error: "Supabase is not configured.", email };
+  const { data, error } = await supabase.auth.verifyOtp({
+    email,
+    token,
+    type: "email",
+  });
+  return { error: error?.message ?? null, email: data.user?.email ?? email };
+}
