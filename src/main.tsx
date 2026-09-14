@@ -342,7 +342,7 @@ function App() {
           {page === "power" && <Power telemetry={telemetry} />}
           {page === "preflight" && <Preflight checks={checks} toggleCheck={toggleCheck} onAction={notify} />}
           {page === "replay" && <Replay onAction={notify} />}
-          {page === "settings" && <Settings onAction={notify} />}
+          {page === "settings" && <Settings onAction={notify} accountEmail={accountEmail} />}
 
           <footer className="content-footer"><span>FLIGHT DECK / ENGINEERING CONSOLE</span><span><span className="status-led green" /> Local control first · Browser actuator path disabled</span></footer>
         </div>
@@ -460,7 +460,7 @@ function Replay({ onAction }: { onAction: (message: string) => void }) {
   return <><PageIntro eyebrow="RECORDED DATA" title="Flight logs & replay" text="Recordings preserve their source and freshness metadata. Replay cannot control hardware or generate current alerts." /><div className="replay-toolbar"><input placeholder="Search sessions or notes..." /><button className="select-button" onClick={() => onAction("Environment filter opened — DEMO sessions shown")}>All environments <span>⌄</span></button><span>3 sessions</span></div><Panel eyebrow="SESSION LIBRARY" title="Recent recordings"><div className="session-list">{sessions.map(([name, date, samples]) => <div className="session-row" key={name}><span className="session-icon">↺</span><div><strong>{name}</strong><span>{date} · DEMO · {samples}</span></div><button className="small-button" onClick={() => onAction("Session details opened")}>Details</button><button className="small-button" onClick={() => onAction("Replay opened in isolated mode")}>▶ Replay</button></div>)}</div></Panel><div className="note-card"><span>ⓘ</span><div><strong>Replay is isolated</strong><p>Background tabs can miss telemetry. Uninterrupted onboard recording requires additional firmware and storage.</p></div></div></>;
 }
 
-function Settings({ onAction }: { onAction: (message: string) => void }) {
+function Settings({ onAction, accountEmail }: { onAction: (message: string) => void; accountEmail: string | null }) {
   const [tab, setTab] = useState("Aircraft profiles");
   const [aircraftName, setAircraftName] = useState("Falcon 01");
   const [aircraftId, setAircraftId] = useState("FD-001");
