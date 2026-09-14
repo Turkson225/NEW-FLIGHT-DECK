@@ -343,6 +343,33 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--lime); outl
 .setting-row { display: flex; justify-content: space-between; gap: 13px; border-top: 1px solid var(--line); padding: 14px 0; color: var(--muted); font-size: 9px; }
 .setting-row strong { color: var(--soft); font-size: 9px; text-align: right; }
 .secret-note { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 13px; color: var(--muted); font-size: 8px; line-height: 1.55; }
+
+.sidebar-collapsed .sidebar { width: 68px; padding-left: 8px; padding-right: 8px; }
+.sidebar-collapsed .brand-row { padding-left: 10px; }
+.sidebar-collapsed .brand-row > div:nth-child(2),
+.sidebar-collapsed .aircraft-card-mini,
+.sidebar-collapsed .nav-section-label,
+.sidebar-collapsed .nav-link > span:nth-child(2),
+.sidebar-collapsed .nav-badge,
+.sidebar-collapsed .sidebar-footer { display: none; }
+.sidebar-collapsed .nav-link { justify-content: center; padding: 12px 5px; }
+.sidebar-collapsed .nav-link-icon { font-size: 17px; }
+@media (max-width: 850px) {
+  .mobile-nav-open .sidebar {
+    width: 248px;
+    padding-left: 13px;
+    padding-right: 13px;
+  }
+  .mobile-nav-open .brand-row > div:nth-child(2),
+  .mobile-nav-open .aircraft-card-mini,
+  .mobile-nav-open .nav-section-label,
+  .mobile-nav-open .nav-link > span:nth-child(2),
+  .mobile-nav-open .nav-badge,
+  .mobile-nav-open .sidebar-footer { display: block; }
+  .mobile-nav-open .nav-link { justify-content: flex-start; padding: 10px 11px; }
+  .mobile-nav-open .nav-link-icon { font-size: 13px; }
+}
+
 @media (max-width: 1150px) { .kpi-grid { grid-template-columns: repeat(3,1fr); } .mission-hero { grid-template-columns: 1.4fr .8fr; } .hero-readiness { display: none; } }
 @media (max-width: 850px) { .sidebar { width: 68px; padding-left: 8px; padding-right: 8px; } .brand-row { padding-left: 10px; } .brand-row > div:nth-child(2), .collapse-button, .aircraft-card-mini, .nav-section-label, .nav-link > span:nth-child(2), .nav-badge, .sidebar-footer { display: none; } .nav-link { justify-content: center; padding: 12px 5px; } .nav-link-icon { font-size: 17px; } .topbar { padding: 17px 20px; } .verified-pill { display: none; } .content { padding: 20px; } .context-bar { align-items: flex-start; gap: 10px; flex-direction: column; } .dashboard-columns, .lower-grid, .power-grid, .settings-grid { grid-template-columns: 1fr; } .mission-hero { grid-template-columns: 1fr; padding: 24px; } .hero-orbit { margin-top: 20px; } .hero-copy h2 { font-size: 26px; } .kpi-grid { grid-template-columns: repeat(2,1fr); } .content-footer { flex-direction: column; gap: 7px; } }
 @media (max-width: 550px) { .topbar { align-items: flex-start; flex-direction: column; gap: 14px; } .topbar-right { width: 100%; flex-wrap: wrap; } .mobile-menu { display: inline-block; border: 0; background: transparent; color: var(--muted); font-size: 17px; margin-right: 7px; } .topbar-left h1 { display: inline; margin-left: 5px; } .breadcrumb { display: none; } .kpi-grid, .sensor-kpis { grid-template-columns: 1fr; } .context-actions { flex-wrap: wrap; } .hero-buttons, .mix-toolbar, .replay-toolbar { align-items: stretch; flex-direction: column; } .preset-select { margin-right: 0; } .chart-toolbar { align-items: flex-start; flex-direction: column; gap: 12px; } .chart-tabs { flex-wrap: wrap; } .monitor-attitude, .calibration-row { align-items: flex-start; flex-direction: column; } .calibration-action { text-align: left; } .table-header { display: none; } .channel-row { grid-template-columns: 48px 1fr 1fr; gap: 7px; padding: 12px 10px; } .channel-row span:nth-of-type(2), .channel-row small { display: none; } .replay-toolbar input { min-width: 0; } .session-row { grid-template-columns: 22px 1fr auto; } .session-row .small-button:first-of-type { display: none; } .joystick .stick-pad { width: 105px; height: 105px; } }
