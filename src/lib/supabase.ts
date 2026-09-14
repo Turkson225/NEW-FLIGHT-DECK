@@ -23,7 +23,7 @@ export function workspaceId(): string | undefined {
 
 export async function cloudRequest(path: string, options?: RequestInit): Promise<Response> {
   const parsed = new URL(path, window.location.origin);
-  const resource = parsed.pathname.split("/").filter(Boolean).at(-1);
+  const resource = parsed.pathname.split("/").filter(Boolean).slice(-1)[0];
   const method = options?.method ?? "GET";
 
   if (!supabase) {
