@@ -33,8 +33,8 @@ jobs:
         run: npm run build
         env:
           BASE_PATH: /NEW-FLIGHT-DECK/
-          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL || '${{' }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY || '${{' }}
+                    VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL || 'https://zqhhoiqmnzmsrendkive.supabase.co' }}
+                    VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_iWu9L5yEb8s28TycM7ljFg_lcw9fSIf' }}
           VITE_WORKSPACE_ID: ${{ vars.VITE_WORKSPACE_ID }}
 
       - name: Configure Pages
