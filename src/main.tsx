@@ -90,6 +90,8 @@ function App() {
   const [page, setPage] = useState<Page>("overview");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [accountEmail, setAccountEmail] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("DEMO");
   const [telemetry, setTelemetry] = useState(initialTelemetry);
   const [signal, setSignal] = useState<number[]>([82, 86, 84, 89, 87, 91, 88, 92, 90, 94, 91, 93, 96, 94, 95, 93, 96, 95]);
@@ -257,7 +259,7 @@ function App() {
             <h1>{pageTitles[page]}</h1>
           </div>
           <div className="topbar-right">
-            <div className="verified-pill"><span className={liveStatus === "connected" ? "online-dot" : "status-led orange"} /> {liveStatusLabel(liveStatus)}</div>
+            {accountEmail ? <div className="verified-pill"><span className="online-dot" /> {accountEmail}</div> : <button className="verified-pill signin-trigger" onClick={() => setAuthOpen(true)}><span className="status-led orange" /> Sign in</button>}
             <div className="mode-control">
               {(["DEMO", "LIVE", "REPLAY"] as Mode[]).map((item) => (
                 <button key={item} className={mode === item ? "mode-tab selected" : "mode-tab"} onClick={() => setMode(item)}>{item}</button>
@@ -271,7 +273,8 @@ function App() {
           </div>
         </header>
 
-        <div className="content">
+        {authOpen && <SignInModal accountEmail={accountEmail} onClose={() => setAuthOpen(false)} onSignedIn={(email) => { setAccountEmail(email); setAuthOpen(false); notify("Signed in successfully"); }} onSignedOut={() => { setAccountEmail(null); notify("Signed out"); }} />}
+          <div className="content">
           <div className="context-bar">
             <div className="context-status"><span className={liveStatus === "connected" ? "status-led green" : "status-led orange"} /><strong>{liveStatusLabel(liveStatus)}</strong><span>Falcon 01 · FD-001</span></div>
             <div className="context-actions">
@@ -454,6 +457,39 @@ function Settings({ onAction }: { onAction: (message: string) => void }) {
   };
 
   return <><PageIntro eyebrow="AIRCRAFT IDENTITY, ACCESS & INTEGRATION" title="Profiles & settings" text="Configure the station without placing device tokens or backend secrets in the browser bundle." /><div className="settings-tabs"><button className="selected" onClick={() => onAction("Aircraft profile settings selected")}>Aircraft profile</button><button onClick={() => onAction("Integration settings selected")}>Integration</button><button onClick={() => onAction("Access and storage settings selected")}>Access & storage</button><button onClick={() => onAction("Wiring reference selected")}>Wiring reference</button></div><section className="settings-grid"><Panel eyebrow="AIRCRAFT CONFIGURATION" title="Falcon 01"><Setting label="Aircraft name" value="Falcon 01" /><Setting label="Aircraft ID" value="FD-001" /><Setting label="Profile" value="Fixed-wing · custom nRF24 platform" /><Setting label="Telemetry target" value="10 Hz · standard dashboard" /><button className="primary-button wide" onClick={() => onAction("Configuration saved for this session")}>Save changes</button></Panel><Panel eyebrow="CLOUD CONNECTION" title="New Supabase gateway"><Setting label="Public project URL" value={supabaseConfigured ? "Configured" : "Not configured"} /><Setting label="Browser session" value={accountEmail ?? "Signed out"} /><Setting label="Live telemetry" value={accountEmail ? "Ready to poll" : "Sign-in required"} />{!accountEmail && <div className="auth-form"><input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" type="email" /><button className="outline-button wide" onClick={connectAccount}>Email sign-in link →</button><small>{authMessage}</small></div>}<button className="outline-button wide" onClick={() => onAction("NodeMCU ingest remains server-authenticated")}>Connect NodeMCU →</button><div className="secret-note">The device token belongs in NodeMCU secrets and the new Supabase Edge Function secrets. It must never be placed in this browser bundle.</div></Panel></section></>;
+}
+
+function SignInModal({ accountEmail, onClose, onSignedIn, onSignedOut }: { accountEmail: string | null; onClose: () => void; onSignedIn: (email: string) => void; onSignedOut: () => void }) {
+  const [email, setEmail] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const requestLink = async () => {
+    if (!email.trim()) {
+      setMessage("Enter your operator email address.");
+      return;
+    }
+    setBusy(true);
+    const error = await sendMagicLink(email.trim());
+    setBusy(false);
+    setMessage(error ?? "Magic link sent. Check your email to continue.");
+    if (!error) onSignedIn(email.trim());
+  };
+
+  const signOut = async () => {
+    await supabase?.auth.signOut();
+    onSignedOut();
+    onClose();
+  };
+
+  return <div className="auth-backdrop" onClick={onClose}>
+    <section className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="sign-in-title" onClick={(event) => event.stopPropagation()}>
+      <button className="auth-close" onClick={onClose} aria-label="Close sign in">×</button>
+      <div className="eyebrow lime">FLIGHT DECK ACCESS</div>
+      <h2 id="sign-in-title">{accountEmail ? "Operator session" : "Sign in to Flight Deck"}</h2>
+      {accountEmail ? <><p className="auth-copy">Authenticated operator session</p><div className="auth-account"><span className="online-dot" />{accountEmail}</div><button className="primary-button wide" onClick={signOut}>Sign out</button></> : <><p className="auth-copy">Use your Supabase email link to access protected aircraft telemetry.</p><input className="auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" autoComplete="email" /><button className="primary-button wide" onClick={requestLink} disabled={busy}>{busy ? "Sending..." : "Send sign-in link →"}</button>{message && <div className="auth-message">{message}</div>}<small className="auth-safety">The browser is read-only. Authentication does not enable actuator control.</small></>}
+    </section>
+  </div>;
 }
 
 function PageIntro({ eyebrow, title, text }: { eyebrow: string; title: string; text: string }) {
