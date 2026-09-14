@@ -293,7 +293,7 @@ function App() {
             <h1>{pageTitles[page]}</h1>
           </div>
           <div className="topbar-right">
-            {accountEmail ? <div className="verified-pill"><span className="online-dot" /> {accountEmail}</div> : <button className="verified-pill signin-trigger" onClick={() => setAuthOpen(true)}><span className="status-led orange" /> Sign in</button>}
+            {accountEmail ? <><div className="verified-pill"><span className="online-dot" /> Verified account · {accountEmail}</div><button className="signout-button" onClick={async () => { await supabase?.auth.signOut(); setAccountEmail(null); setDemoAccess(false); setToast("Signed out"); }}>Sign out</button></> : <button className="verified-pill signin-trigger" onClick={() => setAuthOpen(true)}><span className="status-led orange" /> Sign in</button>}
             <div className="mode-control">
               {(["DEMO", "LIVE", "REPLAY"] as Mode[]).map((item) => (
                 <button key={item} className={mode === item ? "mode-tab selected" : "mode-tab"} onClick={() => setMode(item)}>{item}</button>
