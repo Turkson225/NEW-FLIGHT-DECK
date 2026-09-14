@@ -473,7 +473,6 @@ function SignInModal({ accountEmail, onClose, onSignedIn, onSignedOut }: { accou
     const error = await sendMagicLink(email.trim());
     setBusy(false);
     setMessage(error ?? "Magic link sent. Check your email to continue.");
-    if (!error) onSignedIn(email.trim());
   };
 
   const signOut = async () => {
