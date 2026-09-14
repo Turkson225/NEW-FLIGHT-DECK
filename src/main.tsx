@@ -27,11 +27,17 @@ type Telemetry = {
   link: number;
   battery: number;
   voltage: number;
+  transmitterVoltage: number;
+  packetAge: number;
+  retries: number;
+  wifiRssi: number;
   pitch: number;
   roll: number;
   temperature: number;
   acceleration: number[];
   angular: number[];
+  armed: boolean | null;
+  flightMode: string | null;
 };
 
 const nav = [
@@ -67,16 +73,23 @@ function mapCloudFrame(frame: any): Telemetry {
   const link = radio?.expected > 0 ? (radio.received / radio.expected) * 100 : frame?.links?.radio === true ? 100 : 0;
   const value = (candidate: unknown, fallback = 0) =>
     typeof candidate === "number" && Number.isFinite(candidate) ? candidate : fallback;
+  const voltage = value(frame?.aircraftVoltage);
   return {
     timestamp: frame?.receivedAt ? new Date(frame.receivedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—",
     link: Math.max(0, Math.min(100, link)),
-    battery: 0,
-    voltage: value(frame?.aircraftVoltage),
+    battery: voltage > 0 ? Math.max(0, Math.min(100, ((voltage - 10.2) / 2.4) * 100)) : 0,
+    voltage,
+    transmitterVoltage: value(frame?.transmitterVoltage),
+    packetAge: value(radio?.packetAge),
+    retries: value(radio?.retries),
+    wifiRssi: value(frame?.wifiRssi),
     pitch: value(frame?.attitude?.pitch),
     roll: value(frame?.attitude?.roll),
     temperature: value(frame?.chipTemp),
     acceleration: [value(frame?.accel?.x) / 9.80665, value(frame?.accel?.y) / 9.80665, value(frame?.accel?.z) / 9.80665],
     angular: [value(frame?.gyro?.x), value(frame?.gyro?.y), value(frame?.gyro?.z)],
+    armed: typeof frame?.armed === "boolean" ? frame.armed : null,
+    flightMode: typeof frame?.mode === "string" ? frame.mode : null,
   };
 }
 
@@ -98,12 +111,45 @@ const initialTelemetry: Telemetry = {
   link: 0,
   battery: 0,
   voltage: 0,
+  transmitterVoltage: 0,
+  packetAge: 0,
+  retries: 0,
+  wifiRssi: 0,
   pitch: 0,
   roll: 0,
   temperature: 0,
-  acceleration: [0.08, 0.14, -0.98],
-  angular: [0.52, -0.41, -0.16],
+  acceleration: [0, 0, 0],
+  angular: [0, 0, 0],
+  armed: null,
+  flightMode: null,
 };
+
+function demoTelemetry(elapsedSeconds: number): Telemetry {
+  const roll = 9.8 * Math.sin(elapsedSeconds / 7.5) + 1.4 * Math.sin(elapsedSeconds / 2.7);
+  const pitch = 1.7 + 2.8 * Math.sin(elapsedSeconds / 9.2);
+  const link = 99.45 + 0.35 * Math.sin(elapsedSeconds / 4.4);
+  const voltage = 12.1 - Math.min(elapsedSeconds / 18000, .18) + .025 * Math.sin(elapsedSeconds / 5.5);
+  const transmitterVoltage = 8.08 - Math.min(elapsedSeconds / 28000, .1) + .015 * Math.sin(elapsedSeconds / 8);
+  const rollRadians = roll * Math.PI / 180;
+  const pitchRadians = pitch * Math.PI / 180;
+  return {
+    timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    link,
+    battery: Math.max(0, Math.min(100, ((voltage - 10.2) / 2.4) * 100)),
+    voltage,
+    transmitterVoltage,
+    packetAge: 14 + Math.round(5 * (1 + Math.sin(elapsedSeconds / 3))),
+    retries: Math.max(0, Math.round(12 + elapsedSeconds / 18)),
+    wifiRssi: -58 + Math.round(3 * Math.sin(elapsedSeconds / 11)),
+    pitch,
+    roll,
+    temperature: 32.4 + .4 * Math.sin(elapsedSeconds / 28),
+    acceleration: [Math.sin(pitchRadians), -Math.sin(rollRadians), -Math.cos(rollRadians) * Math.cos(pitchRadians)],
+    angular: [1.31 * Math.cos(elapsedSeconds / 7.5), .31 * Math.cos(elapsedSeconds / 9.2), .18 * Math.sin(elapsedSeconds / 6)],
+    armed: true,
+    flightMode: "Manual RC",
+  };
+}
 
 function App() {
   const [page, setPage] = useState<Page>("overview");
@@ -119,7 +165,7 @@ function App() {
   const [demoAccess, setDemoAccess] = useState(false);
   const [mode, setMode] = useState<Mode>("DEMO");
   const [telemetry, setTelemetry] = useState(initialTelemetry);
-  const [signal, setSignal] = useState<number[]>([82, 86, 84, 89, 87, 91, 88, 92, 90, 94, 91, 93, 96, 94, 95, 93, 96, 95]);
+  const [signal, setSignal] = useState<number[]>([98.8, 99.1, 99.3, 99.5, 99.4, 99.7, 99.6, 99.8, 99.5, 99.7, 99.6, 99.4, 99.8, 99.7, 99.6, 99.8, 99.5, 99.6]);
   const [chart, setChart] = useState<ChartKey>("link");
   const [mixEnabled, setMixEnabled] = useState(true);
   const [throttle, setThrottle] = useState(64);
@@ -127,6 +173,8 @@ function App() {
   const [notifications, setNotifications] = useState(false);
   const [recording, setRecording] = useState(false);
   const [voice, setVoice] = useState(false);
+  const [highContrast, setHighContrast] = useState(false);
+  const [sessionSeconds, setSessionSeconds] = useState(0);
   const [toast, setToast] = useState("DEMO simulator active");
   const [liveStatus, setLiveStatus] = useState<LiveStatus>("demo");
   const [checks, setChecks] = useState<Record<string, boolean>>({
@@ -168,10 +216,25 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (mode !== "LIVE") {
-      setLiveStatus(mode === "DEMO" ? "demo" : "replay");
+    if (mode === "DEMO") {
+      const started = Date.now();
+      setLiveStatus("demo");
+      setToast("DEMO simulator active");
+      const tick = () => {
+        const elapsed = (Date.now() - started) / 1000;
+        const next = demoTelemetry(elapsed);
+        setTelemetry(next);
+        setSignal((items) => [...items.slice(-29), Number(next.link.toFixed(2))]);
+      };
+      tick();
+      const timer = window.setInterval(tick, 1000);
+      return () => window.clearInterval(timer);
+    }
+
+    if (mode === "REPLAY") {
+      setLiveStatus("replay");
       setTelemetry(initialTelemetry);
-      setToast(mode === "DEMO" ? "DEMO simulator active" : "REPLAY is isolated from hardware");
+      setToast("REPLAY is isolated from hardware");
       return;
     }
 
@@ -180,7 +243,7 @@ function App() {
       if (!supabaseConfigured || !supabase) {
         setLiveStatus("not-configured");
         setTelemetry(initialTelemetry);
-        setToast("LIVE needs the new Supabase project variables");
+        setToast("LIVE needs the Supabase project variables");
         return;
       }
 
@@ -212,7 +275,7 @@ function App() {
         const next = mapCloudFrame(payload.frame);
         const age = Date.now() - Number(payload.frame.receivedAt ?? 0);
         setTelemetry(next);
-        setSignal((items) => [...items.slice(-23), Math.round(next.link)]);
+        setSignal((items) => [...items.slice(-29), Number(next.link.toFixed(2))]);
         setLiveStatus(age > 3000 ? "stale" : "connected");
         setToast(age > 3000 ? "Telemetry is stale · aircraft condition is unknown" : "Live telemetry synchronized");
       } catch {
@@ -230,6 +293,14 @@ function App() {
       window.clearInterval(timer);
     };
   }, [mode, recording]);
+
+  useEffect(() => {
+    const started = Date.now();
+    const tick = () => setSessionSeconds(Math.floor((Date.now() - started) / 1000));
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -271,7 +342,7 @@ function App() {
   }
 
   return (
-    <div className={"app-shell" + (sidebarCollapsed ? " sidebar-collapsed" : "") + (mobileNavOpen ? " mobile-nav-open" : "")}>
+    <div className={"app-shell" + (sidebarCollapsed ? " sidebar-collapsed" : "") + (mobileNavOpen ? " mobile-nav-open" : "") + (highContrast ? " high-contrast" : "")}>
       <aside className="sidebar">
         <div className="brand-row">
           <div className="brand-mark"><img src={assetUrl("flight-deck-mark.svg")} alt="" /></div>
@@ -331,25 +402,27 @@ function App() {
       </aside>
 
       <main className="main-content">
-        <header className="topbar">
-          <div className="topbar-left">
+        <header className="topbar flight-topbar">
+          <div className="topbar-aircraft">
             <button className="mobile-menu" aria-label="Open menu" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(!mobileNavOpen)}>☰</button>
-            <div className="breadcrumb">FLIGHT OPERATIONS <span>/</span> {pageTitles[page]}</div>
-            <h1>{pageTitles[page]}</h1>
+            <button className="desktop-collapse" aria-label="Toggle navigation" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>◫</button>
+            <span className="topbar-aircraft-mark"><img src={assetUrl("flight-deck-mark.svg")} alt="" /></span>
+            <div><strong>Falcon 01 <span>/ FD-001</span></strong><small>Fixed-wing · Custom nRF24 platform</small></div>
+            <span className={"source-chip " + mode.toLowerCase()}><i className={liveStatus === "connected" || liveStatus === "demo" ? "status-led green" : "status-led orange"} />{mode === "DEMO" ? "Simulator" : mode === "LIVE" ? "Live link" : "Replay"}</span>
           </div>
           <div className="topbar-right">
-            {accountEmail ? <><div className="verified-pill"><span className="online-dot" /> Verified account · {accountEmail}</div><button className="signout-button" onClick={async () => { await supabase?.auth.signOut(); setAccountEmail(null); setAccountName(null); setDemoAccess(false); setToast("Signed out"); }}>Sign out</button></> : <button className="verified-pill signin-trigger" onClick={() => setAuthOpen(true)}><span className="status-led orange" /> Sign in</button>}
+            <button className="parachute-top-button" onClick={() => notify("Parachute control is locked in the browser")}><span>◇</span> Parachute</button>
+            <button className={voice ? "top-icon-button selected" : "top-icon-button"} onClick={() => setVoice(!voice)} aria-label={voice ? "Mute voice alerts" : "Enable voice alerts"}>{voice ? "◉" : "◌"}</button>
             <button className="command-trigger" onClick={() => setCommandOpen(true)} aria-label="Open command center"><span>Search</span><kbd>⌘ K</kbd></button>
-            <div className="mode-control">
+            <div className="mode-control" aria-label="Data source">
               {(["DEMO", "LIVE", "REPLAY"] as Mode[]).map((item) => (
                 <button key={item} className={mode === item ? "mode-tab selected" : "mode-tab"} onClick={() => setMode(item)}>{item}</button>
               ))}
             </div>
-            <button className={recording ? "record-button active" : "record-button"} onClick={() => { setRecording(!recording); notify(recording ? "Recording stopped" : "Recording started"); }}>
-              <span className={recording ? "record-dot pulse" : "record-dot"} /> {recording ? "Recording" : "Record"}
-            </button>
             <button className={notifications ? "top-icon-button selected" : "top-icon-button"} onClick={() => setNotifications(!notifications)} aria-label="Notifications">♢</button>
-            <button className="top-avatar" onClick={() => setAuthOpen(true)} aria-label="Open operator account">{initialsFor(accountName)}</button>
+            <button className={highContrast ? "top-icon-button selected" : "top-icon-button"} onClick={() => setHighContrast(!highContrast)} aria-label="Toggle enhanced contrast">☼</button>
+            <button className="owner-chip" onClick={() => setAuthOpen(true)}>{accountEmail ? "OWNER" : "DEMO"}</button>
+            {accountEmail && <button className="signout-button compact-signout" onClick={async () => { await supabase?.auth.signOut(); setAccountEmail(null); setAccountName(null); setDemoAccess(false); setToast("Signed out"); }}>Sign out</button>}
           </div>
         </header>
 
@@ -367,14 +440,13 @@ function App() {
         {authOpen && <SignInModal accountEmail={accountEmail} accountName={accountName} onClose={() => setAuthOpen(false)} onSignedIn={(email, name) => { setAccountEmail(email); setAccountName(name ?? accountNameFor(email)); setDemoAccess(false); setAuthOpen(false); notify("Signed in successfully"); }} onSignedOut={() => { setAccountEmail(null); setAccountName(null); setDemoAccess(false); notify("Signed out"); }} />}
         {recoveryOpen && <PasswordRecoveryModal onClose={() => setRecoveryOpen(false)} onComplete={() => { setRecoveryOpen(false); notify("Password updated successfully"); }} />}
           <div className="content">
-          <div className="context-bar">
-            <div className="context-status"><span className={liveStatus === "connected" ? "status-led green" : "status-led orange"} /><strong>{liveStatusLabel(liveStatus)}</strong><span>Falcon 01 · FD-001</span></div>
+          {page !== "overview" && <div className="context-bar">
+            <div className="context-status"><span className={liveStatus === "connected" || liveStatus === "demo" ? "status-led green" : "status-led orange"} /><strong>{liveStatusLabel(liveStatus)}</strong><span>Falcon 01 · FD-001</span></div>
             <div className="context-actions">
-              <button className="outline-button" onClick={() => notify("Control path is locked in the browser")}>◇ Parachute</button>
-              <button className="outline-button" onClick={() => setVoice(!voice)}>{voice ? "◉ Voice on" : "◌ Voice off"}</button>
-              <button className="outline-button" onClick={() => notify("No new alerts")}>Alerts <span className="alert-count">3</span></button>
+              <button className="outline-button" onClick={() => notify("Control path is locked in the browser")}>◇ Control boundary</button>
+              <button className="outline-button" onClick={() => notify("No unacknowledged live alerts")}>Alerts <span className="alert-count">3</span></button>
             </div>
-          </div>
+          </div>}
 
           {notifications && <div className="notification-drawer"><strong>Station notifications</strong><span>All current alerts are simulator-only. No live device telemetry is verified.</span><button onClick={() => setNotifications(false)}>Dismiss</button></div>}
 
@@ -382,6 +454,11 @@ function App() {
             <Overview
               telemetry={telemetry}
               signal={signal}
+              mode={mode}
+              liveStatus={liveStatus}
+              recording={recording}
+              setRecording={setRecording}
+              sessionSeconds={sessionSeconds}
               chart={chart}
               setChart={setChart}
               mixEnabled={mixEnabled}
@@ -415,6 +492,11 @@ function App() {
 function Overview(props: {
   telemetry: Telemetry;
   signal: number[];
+  mode: Mode;
+  liveStatus: LiveStatus;
+  recording: boolean;
+  setRecording: (value: boolean) => void;
+  sessionSeconds: number;
   chart: ChartKey;
   setChart: (value: ChartKey) => void;
   mixEnabled: boolean;
@@ -426,71 +508,145 @@ function Overview(props: {
   onNavigate: (page: Page) => void;
   notify: (message: string) => void;
 }) {
-  const { telemetry, signal, chart, setChart, mixEnabled, setMixEnabled, throttle, setThrottle, mixStrength, setMixStrength, onNavigate, notify } = props;
-  const leftAileron = Math.round(1500 + (mixEnabled ? (mixStrength * 1.5) : 86));
-  const rightAileron = Math.round(1500 - (mixEnabled ? (mixStrength * 1.5) : 86));
-  return (
-    <>
-      <section className="mission-hero">
-        <div className="hero-copy">
-          <div className="eyebrow lime">MISSION CONTROL · DEMO ENVIRONMENT</div>
-          <h2>Operational clarity<br /><em>at every altitude.</em></h2>
-          <p>Observe the aircraft system, validate control surfaces, and keep flight-critical decisions onboard.</p>
-          <div className="hero-buttons"><button className="primary-button" onClick={() => onNavigate("preflight")}>Open preflight <span>→</span></button><button className="ghost-button" onClick={() => notify("Live aircraft control is intentionally locked")}>Review control boundary <span>◇</span></button></div>
+  const { telemetry, signal, mode, liveStatus, recording, setRecording, sessionSeconds, chart, setChart, mixEnabled, setMixEnabled, throttle, setThrottle, mixStrength, setMixStrength, onNavigate, notify } = props;
+  const hasSample = mode === "DEMO" || liveStatus === "connected" || liveStatus === "stale";
+  const healthy = mode === "DEMO" || liveStatus === "connected";
+  const duration = [Math.floor(sessionSeconds / 3600), Math.floor(sessionSeconds / 60) % 60, sessionSeconds % 60].map((part) => String(part).padStart(2, "0")).join(":");
+  const leftAileron = Math.max(0, Math.min(100, 50 + telemetry.roll * 2.3));
+  const rightAileron = 100 - leftAileron;
+  const elevator = Math.max(0, Math.min(100, 50 + telemetry.pitch * 4));
+  const readiness = healthy ? 92 : liveStatus === "stale" ? 48 : 18;
+  const sourceDetail = mode === "DEMO" ? "Deterministic simulator" : mode === "LIVE" ? liveStatusLabel(liveStatus) : "Recorded data only";
+
+  return <>
+    <div className="overview-page-head">
+      <PageIntro eyebrow={"FLIGHT OPERATIONS / " + mode} title="Overview" text="Your aircraft, at a glance." />
+      <div className="overview-toolbar">
+        <button className="select-button" onClick={() => notify("Gentle roll & pitch profile selected")}>Gentle roll & pitch <span>⌄</span></button>
+        <button className="outline-button" onClick={() => notify("Dashboard configuration saved locally")}>▣ Save changes</button>
+        <button className={recording ? "primary-button recording-active" : "primary-button"} onClick={() => { setRecording(!recording); notify(recording ? "Session recording stopped" : "Session recording started"); }}><span className={recording ? "record-dot pulse" : "record-dot"} />{recording ? "Recording session" : "Record session"}</button>
+      </div>
+    </div>
+
+    <section className="flight-metric-grid">
+      <FlightMetricCard label="Aircraft battery" value={hasSample ? telemetry.voltage.toFixed(2) : "—"} unit="V" detail={hasSample ? "3S LiPo · Above warning" : "Awaiting verified voltage"} icon="▣" tone="lime" />
+      <FlightMetricCard label="Transmitter battery" value={hasSample ? telemetry.transmitterVoltage.toFixed(2) : "—"} unit="V" detail={hasSample ? "2S Li-ion · Independent pack" : "Nano UART data unavailable"} icon="◉" tone="blue" />
+      <FlightMetricCard label="Radio packet delivery" value={hasSample ? telemetry.link.toFixed(1) : "—"} unit="%" detail={hasSample ? telemetry.retries + " retries · since session start" : "No current nRF24 sample"} icon="⌁" tone={healthy ? "lime" : "orange"} spark={signal} />
+      <FlightMetricCard label="Session duration" value={duration} detail={recording ? "Recording active · browser session" : "Not verified airborne time"} icon="◷" tone={recording ? "orange" : "muted"} />
+    </section>
+
+    <section className="flight-board-grid">
+      <section className="flight-board-card pfd-board">
+        <header><div><span>PRIMARY FLIGHT DISPLAY</span><strong>Body attitude</strong></div><span className={healthy ? "instrument-chip active" : "instrument-chip"}><i className={healthy ? "status-led green" : "status-led orange"} />{hasSample ? "IMU ESTIMATE" : "NO DATA"}</span></header>
+        <PrimaryFlightDisplay telemetry={telemetry} hasSample={hasSample} />
+      </section>
+
+      <section className="flight-board-card attitude-board">
+        <header><div><span>AIRCRAFT DIGITAL TWIN</span><strong>Attitude visualization</strong></div><span className="board-caption">3D · BODY FRAME</span></header>
+        <AircraftAttitude telemetry={telemetry} hasSample={hasSample} />
+        <div className="attitude-metrics">
+          <Readout label="ROLL RATE" value={hasSample ? telemetry.angular[0].toFixed(1) + " °/s" : "—"} />
+          <Readout label="PITCH RATE" value={hasSample ? telemetry.angular[1].toFixed(1) + " °/s" : "—"} />
+          <Readout label="THROTTLE CMD" value={hasSample ? throttle + " %" : "—"} />
         </div>
-        <div className="hero-orbit">
-          <div className="orbit-ring ring-one" /><div className="orbit-ring ring-two" /><div className="orbit-ring ring-three" />
-          <img className="hero-aircraft-image" src={assetUrl("falcon-aircraft.svg")} alt="Falcon 01 fixed-wing digital twin" />
-          <div className="orbit-label label-top">FD-001</div><div className="orbit-label label-right">BENCH / 01</div><div className="orbit-label label-bottom">NOMINAL</div>
+      </section>
+
+      <section className="flight-board-card health-board">
+        <header><div><span>SYSTEM STATUS</span><strong>Aircraft health</strong></div><span className={healthy ? "health-shield healthy" : "health-shield"}>◇</span></header>
+        <div className="aircraft-health-list">
+          <AircraftHealthRow label="nRF24 radio" state={healthy ? "Healthy" : "Unknown"} tone={healthy ? "green" : "orange"} />
+          <AircraftHealthRow label="Nano ↔ NodeMCU" state={healthy ? "Healthy" : "Unknown"} tone={healthy ? "green" : "orange"} />
+          <AircraftHealthRow label="Onboard Wi-Fi" state={mode === "DEMO" ? "Simulated" : telemetry.wifiRssi ? telemetry.wifiRssi + " dBm" : "Unknown"} tone={healthy ? "green" : "orange"} />
+          <AircraftHealthRow label="MPU6050" state={hasSample ? "Healthy" : "Unknown"} tone={hasSample ? "green" : "orange"} />
+          <AircraftHealthRow label="Control authority" state="Manual RC" tone="blue" />
+          <AircraftHealthRow label="Arm state" state={telemetry.armed === null ? "Unknown" : telemetry.armed ? "ARMED" : "DISARMED"} tone={telemetry.armed ? "orange" : telemetry.armed === false ? "green" : "gray"} />
         </div>
-        <div className="hero-readiness"><span>READINESS</span><strong>STANDBY</strong><small>Telemetry simulated</small><div className="readiness-track"><i /></div><button onClick={() => onNavigate("preflight")}>6/6 operator gates →</button></div>
+        <button className="board-link" onClick={() => onNavigate("sensors")}>Open sensor diagnostics <span>→</span></button>
       </section>
 
-      <section className="kpi-grid">
-        <Kpi icon="⌁" label="TELEMETRY" value="LIVE DEMO" detail={telemetry.timestamp} accent="lime" trend="+ stable" />
-        <Kpi icon="◉" label="LINK QUALITY" value={Math.round(telemetry.link) + "%"} detail="nRF24 status · nominal" accent="blue" trend="+4.2%" />
-        <Kpi icon="▣" label="AIRCRAFT BATTERY" value={telemetry.voltage.toFixed(2) + " V"} detail={Math.round(telemetry.battery) + "% estimated"} accent="orange" trend="- 0.2 V" />
-        <Kpi icon="◒" label="ATTITUDE" value={telemetry.pitch.toFixed(1) + "°"} detail={"Pitch · Roll " + telemetry.roll.toFixed(1) + "°"} accent="violet" trend="steady" />
-        <Kpi icon="◇" label="CONTROL PATH" value="LOCKED" detail="Local receiver owns control" accent="red" trend="protected" />
+      <section className="flight-board-card readiness-board">
+        <header><div><span>RECOVERY & SAFETY</span><strong>Readiness model</strong></div><span className="board-caption">{mode}</span></header>
+        <div className="readiness-content">
+          <div className="readiness-dial" style={{ background: `conic-gradient(var(--lime) ${readiness * 3.6}deg, rgba(198,243,107,.08) 0deg)` }}><div><strong>{readiness}%</strong><span>READY</span></div></div>
+          <div className="readiness-list"><span><i className="status-led green" />Receiver failsafe <b>ONBOARD</b></span><span><i className={healthy ? "status-led green" : "status-led orange"} />Parachute feedback <b>{healthy ? "READY*" : "UNKNOWN"}</b></span><span><i className="status-led blue" />Browser control <b>LOCKED</b></span></div>
+        </div>
+        <small className="model-disclaimer">* {sourceDetail}. Confirm every safety item physically before flight.</small>
+        <button className="board-link" onClick={() => onNavigate("preflight")}>Review preflight gates <span>→</span></button>
       </section>
 
-      <section className="dashboard-columns">
-        <Panel eyebrow="SYSTEM TELEMETRY · 60 SECOND WINDOW" title="Station signal overview" action="Open monitor →" onAction={() => onNavigate("monitor")} wide>
-          <div className="chart-toolbar"><div className="chart-stat"><strong>{chart === "link" ? Math.round(telemetry.link) + "%" : chart === "acceleration" ? telemetry.acceleration[2].toFixed(2) + " g" : telemetry.angular[0].toFixed(2) + "°/s"}</strong><span>{chart === "link" ? "LINK QUALITY" : chart === "acceleration" ? "RAW ACCELERATION · Z" : "ANGULAR VELOCITY · X"}</span></div><div className="chart-tabs">{(["link", "acceleration", "angular"] as ChartKey[]).map((item) => <button className={chart === item ? "chart-tab selected" : "chart-tab"} key={item} onClick={() => setChart(item)}>{item === "link" ? "Link" : item === "acceleration" ? "Acceleration" : "Angular velocity"}</button>)}</div></div>
-          <TelemetryChart values={chart === "link" ? signal : chart === "acceleration" ? signal.map((_, i) => 55 + Math.sin(i / 2) * 17) : signal.map((_, i) => 50 + Math.cos(i / 2.4) * 14)} color={chart === "link" ? "lime" : chart === "acceleration" ? "orange" : "blue"} />
-          <div className="chart-footer"><span>11:33:17</span><span>11:33:37</span><span>11:33:57</span><span>NOW · {telemetry.timestamp}</span></div>
-        </Panel>
-
-        <Panel eyebrow="AIRCRAFT DIGITAL TWIN" title="Falcon 01" action="Configure →" onAction={() => onNavigate("settings")}>
-          <div className="aircraft-twin">
-            <div className="twin-grid" /><img className="twin-aircraft-image" src={assetUrl("falcon-aircraft.svg")} alt="Falcon 01 aircraft top view" />
-            <div className="twin-label top">PITCH {telemetry.pitch.toFixed(1)}°</div><div className="twin-label right">ROLL {telemetry.roll.toFixed(1)}°</div><div className="twin-label bottom">IMU · 0x68</div>
-          </div>
-          <div className="twin-meta"><div><span>PROFILE</span><strong>Fixed-wing / custom</strong></div><div><span>RADIO</span><strong>nRF24L01+ · 2.4 GHz</strong></div><div><span>COMPUTE</span><strong>Nano + NodeMCU</strong></div></div>
-        </Panel>
+      <section className="flight-board-card link-board">
+        <header><div><span>RADIO TELEMETRY · 60 SECOND WINDOW</span><strong>Packet-delivery trend</strong></div><div className="chart-tabs">{(["link", "acceleration", "angular"] as ChartKey[]).map((item) => <button className={chart === item ? "chart-tab selected" : "chart-tab"} key={item} onClick={() => setChart(item)}>{item === "link" ? "Link" : item === "acceleration" ? "Acceleration" : "Angular"}</button>)}</div></header>
+        <div className="link-chart-summary"><div><strong>{chart === "link" ? (hasSample ? telemetry.link.toFixed(1) + "%" : "—") : chart === "acceleration" ? telemetry.acceleration[2].toFixed(2) + " g" : telemetry.angular[0].toFixed(2) + " °/s"}</strong><span>{chart === "link" ? "CURRENT DELIVERY" : chart === "acceleration" ? "Z-AXIS ACCELERATION" : "ROLL RATE"}</span></div><span><i className={healthy ? "status-led green" : "status-led orange"} /> {sourceDetail}</span></div>
+        <TelemetryChart values={chart === "link" ? signal : chart === "acceleration" ? signal.map((_, index) => 50 + Math.sin(index / 2.2) * 18) : signal.map((_, index) => 52 + Math.cos(index / 2.8) * 14)} color={chart === "link" ? "lime" : chart === "acceleration" ? "orange" : "blue"} />
+        <div className="chart-footer"><span>60s ago</span><span>Target ≥ 90%</span><span>Warn &lt; 70%</span><span>NOW · {telemetry.timestamp}</span></div>
       </section>
 
-      <div className="section-title-row"><div><div className="eyebrow">CONTROL SYSTEM</div><h3>Channels & mixer</h3></div><button className="text-button" onClick={() => onNavigate("mixer")}>Open full mixer →</button></div>
-      <section className="dashboard-columns control-columns">
-        <Panel eyebrow="INTERACTIVE SIMULATOR" title="Physical controller inputs">
-          <div className="joysticks"><Joystick label="JOYSTICK 1" x="0.03" y="0.09" /><Joystick label="JOYSTICK 2" x="0.23" y="0.58" active /></div>
-          <RangeRow label="Throttle slider · A6" value={throttle} setValue={setThrottle} suffix="%" />
-          <div className="pot-row"><span>Potentiometer 1 · A4</span><b>42%</b><span>Potentiometer 2 · A5</span><b>68%</b></div>
-        </Panel>
-        <Panel eyebrow="COMMANDED POSITION" title={mixEnabled ? "Roll mixing · active" : "Independent ailerons"}>
-          <div className="aileron-view"><div className="aileron-readout"><span>LEFT AILERON<strong>{leftAileron} <small>µs</small></strong></span><span>RIGHT AILERON<strong>{rightAileron} <small>µs</small></strong></span></div><div className="plane-control"><span className="plane-body" /><span className="plane-wing left" /><span className="plane-wing right" /><span className="plane-tail" /></div></div>
-          <div className="mix-rule"><span>L = common + roll</span><span>R = common − roll</span></div>
-          <RangeRow label="Mix strength" value={mixStrength} setValue={setMixStrength} suffix="%" />
-          <div className="switch-row"><span><i className="status-led green" /> Aileron mixing</span><button className={mixEnabled ? "toggle on" : "toggle"} onClick={() => setMixEnabled(!mixEnabled)}><i /></button><b>{mixEnabled ? "MIX ON" : "MIX OFF"}</b></div>
-        </Panel>
+      <section className="flight-board-card control-board">
+        <header><div><span>CONTROL INPUTS</span><strong>Channel activity</strong></div><button className="board-link header-link" onClick={() => onNavigate("mixer")}>Open mixer →</button></header>
+        <div className="control-activity-list">
+          <ControlActivityRow label="Elevator" channel="CH1" value={elevator} />
+          <ControlActivityRow label="Rudder" channel="CH2" value={50} />
+          <ControlActivityRow label="Left aileron" channel="CH3" value={leftAileron} />
+          <ControlActivityRow label="Right aileron" channel="CH4" value={rightAileron} />
+          <ControlActivityRow label="Throttle" channel="CH5" value={throttle} accent />
+        </div>
+        <RangeRow label="Throttle simulator" value={throttle} setValue={setThrottle} suffix="%" />
+        <div className="control-quick-row"><button className={mixEnabled ? "toggle on" : "toggle"} onClick={() => setMixEnabled(!mixEnabled)} aria-pressed={mixEnabled}><i /></button><span>Aileron mix {mixEnabled ? "active" : "inactive"}</span><label>Strength <b>{mixStrength}%</b></label><input aria-label="Mix strength" type="range" min="0" max="100" value={mixStrength} onChange={(event) => setMixStrength(Number(event.target.value))} /></div>
       </section>
+    </section>
 
-      <section className="lower-grid">
-        <Panel eyebrow="SYSTEM HEALTH" title="Operational status"><HealthRow label="MPU6050 telemetry" value="Nominal" detail="0x68 · 10 Hz target" tone="green" /><HealthRow label="Control radio" value="Nominal" detail="nRF24 · 250 kbps" tone="green" /><HealthRow label="Aircraft battery" value="Advisory" detail="Divider calibration pending" tone="orange" /><HealthRow label="Cloud gateway" value="Not connected" detail="Live source required" tone="gray" /></Panel>
-        <Panel eyebrow="EVENT STREAM" title="Recent events" action="View history →" onAction={() => onNavigate("replay")}><EventRow time="11:34:06" title="Simulator sample received" detail="Telemetry synchronized · 600 samples" tone="green" /><EventRow time="11:33:58" title="Mixing confirmed" detail={mixEnabled ? "Aircraft-confirmed mix state is ON" : "Aircraft-confirmed mix state is OFF"} tone="blue" /><EventRow time="11:33:41" title="Control path locked" detail="Browser actuator transport disabled" tone="orange" /></Panel>
-      </section>
-    </>
-  );
+    <div className="overview-event-rail">
+      <span className="event-rail-title">LIVE EVENT RAIL</span>
+      <div><i className="event-dot green" /><time>{telemetry.timestamp}</time><strong>Telemetry synchronized</strong><span>{sourceDetail}</span></div>
+      <div><i className="event-dot blue" /><time>NOW</time><strong>Control owner confirmed</strong><span>Physical transmitter · Manual RC</span></div>
+      <div><i className="event-dot orange" /><time>SAFE</time><strong>Browser actuator path disabled</strong><span>Local receiver authority preserved</span></div>
+      <button onClick={() => onNavigate("replay")}>View flight log →</button>
+    </div>
+  </>;
+}
+
+function FlightMetricCard({ label, value, unit, detail, icon, tone, spark }: { label: string; value: string; unit?: string; detail: string; icon: string; tone: string; spark?: number[] }) {
+  const points = spark?.slice(-12).map((item, index, values) => {
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const x = index / Math.max(values.length - 1, 1) * 100;
+    const y = 20 - ((item - min) / Math.max(max - min, .01)) * 16;
+    return x.toFixed(1) + "," + y.toFixed(1);
+  }).join(" ");
+  return <article className={"flight-metric-card " + tone}><div className="flight-metric-top"><span>{label}</span><i>{icon}</i></div><div className="flight-metric-value"><strong>{value}</strong>{unit && <small>{unit}</small>}</div><div className="flight-metric-detail">{detail}</div>{points && <svg viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><polyline points={points} /></svg>}</article>;
+}
+
+function PrimaryFlightDisplay({ telemetry, hasSample }: { telemetry: Telemetry; hasSample: boolean }) {
+  const roll = hasSample ? telemetry.roll : 0;
+  const pitch = hasSample ? telemetry.pitch : 0;
+  const ladderMarks = [-30, -20, -10, 0, 10, 20, 30];
+  return <div className="pfd-screen">
+    <div className="pfd-world" style={{ transform: `translate(-50%, calc(-50% + ${pitch * 4}px)) rotate(${-roll}deg)` }}><div className="pfd-sky" /><div className="pfd-ground" /><div className="pfd-horizon" /></div>
+    <div className="pfd-bank-scale"><i className="bank-pointer" />{[-60, -30, 0, 30, 60].map((mark) => <span key={mark} style={{ transform: `rotate(${mark}deg)` }}><i /></span>)}</div>
+    <div className="pfd-ladder" style={{ transform: `translate(-50%, calc(-50% + ${pitch * 4}px)) rotate(${-roll}deg)` }}>{ladderMarks.map((mark) => <div key={mark} className={mark === 0 ? "ladder-mark horizon-mark" : "ladder-mark"} style={{ top: (50 - mark * 1.35) + "%" }}><span>{Math.abs(mark)}</span><i /><span>{Math.abs(mark)}</span></div>)}</div>
+    <div className="pfd-aircraft-symbol"><i /><span>○</span><i /></div>
+    <div className="pfd-side-tape left"><span>SPD</span><strong>—</strong><small>NO AIRSPEED</small></div>
+    <div className="pfd-side-tape right"><span>ALT</span><strong>—</strong><small>NO BARO</small></div>
+    <div className="pfd-heading"><span>BODY HEADING</span><strong>REL —</strong></div>
+    <div className="pfd-corner-data left"><span>ROLL</span><strong>{hasSample ? roll.toFixed(1) + "°" : "—"}</strong></div>
+    <div className="pfd-corner-data right"><span>PITCH</span><strong>{hasSample ? pitch.toFixed(1) + "°" : "—"}</strong></div>
+    <div className="pfd-source">MPU6050 · BODY ATTITUDE ONLY · NOT NAVIGATION</div>
+  </div>;
+}
+
+function AircraftAttitude({ telemetry, hasSample }: { telemetry: Telemetry; hasSample: boolean }) {
+  const roll = hasSample ? telemetry.roll : 0;
+  const pitch = hasSample ? telemetry.pitch : 0;
+  return <div className="aircraft-stage"><div className="stage-glow" /><div className="stage-floor" /><div className="stage-ring one" /><div className="stage-ring two" /><div className="aircraft-gimbal" style={{ transform: `perspective(650px) rotateX(${58 + pitch * .55}deg) rotateZ(${-roll}deg) translateY(${pitch * -.8}px)` }}><img src={assetUrl("falcon-aircraft.svg")} alt="Falcon 01 body-frame attitude model" /><span className="wing-trace left" /><span className="wing-trace right" /></div><div className="stage-axis"><span>X</span><span>Y</span><span>Z</span></div><small>BODY FRAME · NOT A NAVIGATION VIEW</small></div>;
+}
+
+function AircraftHealthRow({ label, state, tone }: { label: string; state: string; tone: string }) {
+  return <div className="aircraft-health-row"><span>{label}</span><strong className={tone + "-text"}>{state}</strong></div>;
+}
+
+function ControlActivityRow({ label, channel, value, accent }: { label: string; channel: string; value: number; accent?: boolean }) {
+  const clamped = Math.max(0, Math.min(100, value));
+  return <div className="control-activity-row"><span>{channel}</span><strong>{label}</strong><div><i className={accent ? "accent" : ""} style={{ width: clamped + "%" }} /><b style={{ left: clamped + "%" }} /></div><small>{Math.round(clamped)}%</small></div>;
 }
 
 function Monitor({ telemetry, signal, mode, onAction }: { telemetry: Telemetry; signal: number[]; mode: Mode; onAction: (message: string) => void }) {
