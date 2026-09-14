@@ -1,0 +1,6 @@
+[functions.flight-api]
+# JWT is checked using auth.getUser in the function, including confirmed email.
+verify_jwt = false
+[functions.telemetry-ingest]
+# Authenticated independently using a provisioned device token; never a browser key.
+verify_jwt = false
