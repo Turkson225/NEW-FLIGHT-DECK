@@ -10,40 +10,29 @@ The dashboard includes DEMO simulation, LIVE read-only telemetry, REPLAY isolati
     cp .env.example .env
     npm run dev
 
-Set VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY, and optionally VITE_WORKSPACE_ID in .env for the existing FLIGHT-DECK Supabase project.
+The repository is configured to use the existing FLIGHT-DECK Supabase project. The .env file may contain VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY, and optionally VITE_WORKSPACE_ID.
 
 Build locally with npm run build.
 
-## Use the existing FLIGHT-DECK Supabase project
+## Existing Supabase connection
 
-1. Create a existing FLIGHT-DECK Supabase project and copy its project URL and publishable browser key.
-2. Run the schema in supabase/migrations/202609140001_new_flight_deck.sql with the Supabase SQL editor, or use the Supabase CLI.
-3. Deploy both Edge Functions:
+NEW-FLIGHT-DECK now uses the same Supabase project and protected Edge Functions as the original FLIGHT-DECK repository. No new Supabase project is required.
 
-       supabase link --project-ref zqhhoiqmnzmsrendkive
-       supabase db push
-       supabase functions deploy flight-api --no-verify-jwt
-       supabase functions deploy telemetry-ingest --no-verify-jwt
+The GitHub Pages workflow has safe fallbacks for the existing project URL and publishable browser key. You may also add these repository Actions Variables:
 
-4. Configure the Edge Function secrets. Never put these in the browser or GitHub Pages build:
+- VITE_SUPABASE_URL
+- VITE_SUPABASE_PUBLISHABLE_KEY
+- VITE_WORKSPACE_ID (optional)
 
-       supabase secrets set \
-         ALLOWED_ORIGINS=https://turkson225.github.io \
-         DEVICE_ID=FD-001 \
-         DEVICE_WORKSPACE_ID=YOUR_OWNER_USER_UUID \
-         DEVICE_SHARED_TOKEN=GENERATE_A_RANDOM_TOKEN_AT_LEAST_32_CHARACTERS
+The publishable key is browser-safe. Never place a service-role key or DEVICE_SHARED_TOKEN in the frontend or GitHub Pages build.
 
-The flight-api function uses the logged-in Supabase user and workspace membership. The telemetry-ingest function uses the device token and validates the NodeMCU payload before writing telemetry.
-
-5. In GitHub repository Settings → Secrets and variables → Actions → Variables, add VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY, and optionally VITE_WORKSPACE_ID.
-
-The Pages workflow injects these at build time. The publishable key is safe for browser use; service-role keys and device tokens are not.
+The original project must already have its schema, flight-api function, telemetry-ingest function, and server-side device secrets configured. The schema and function files in this repository are a versioned reference for the new dashboard; do not run the migration against the existing production database unless you have confirmed those objects are missing.
 
 ## How LIVE telemetry works
 
     TX Nano → nRF24 + Receiver Nano → level shifter + NodeMCU → HTTPS telemetry-ingest → fd_telemetry → authenticated dashboard
 
-The browser polls flight-api every 2.5 seconds in LIVE mode. If the project is not configured, the operator is signed out, or the NodeMCU has not uploaded a verified sample, the dashboard shows an explicit non-live state.
+In LIVE mode, the browser signs in with a Supabase magic link and polls flight-api every 2.5 seconds. If the operator is signed out, the device has not uploaded a verified sample, or telemetry is stale, the dashboard shows an explicit non-live state.
 
 ## GitHub Pages
 
