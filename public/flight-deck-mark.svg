@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+<title id="title">Flight Deck aircraft mark</title><desc id="desc">A fixed-wing aircraft crossing an orbital flight path.</desc>
+<defs><linearGradient id="bg" x1="48" y1="32" x2="466" y2="480" gradientUnits="userSpaceOnUse"><stop stop-color="#1C291F"/><stop offset="1" stop-color="#0A100D"/></linearGradient><linearGradient id="wing" x1="112" y1="346" x2="406" y2="140" gradientUnits="userSpaceOnUse"><stop stop-color="#C6F36B"/><stop offset="1" stop-color="#F0FFBC"/></linearGradient><filter id="glow"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+<rect x="12" y="12" width="488" height="488" rx="116" fill="url(#bg)" stroke="#C6F36B" stroke-opacity=".24" stroke-width="8"/>
+<path d="M82 320c56 102 192 143 302 82 43-24 78-59 101-100" fill="none" stroke="#FF9869" stroke-width="13" stroke-linecap="round" stroke-dasharray="2 25"/>
+<path d="M78 204c40-92 144-149 247-131 44 8 84 27 119 56" fill="none" stroke="#C6F36B" stroke-opacity=".36" stroke-width="8" stroke-linecap="round"/>
+<path d="M410 104l-24 46 52-5" fill="none" stroke="#C6F36B" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+<g filter="url(#glow)" fill="none" stroke="url(#wing)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
+<path d="M159 330l60-77-93-48 24-28 126 20 76-91c12-15 34-18 50-6 12 10 15 28 7 42l-59 104 50 118-31 19-79-85-49 97-23-12 18-119-77 66z"/>
+</g>
+<circle cx="101" cy="338" r="9" fill="#FF9869"/><circle cx="431" cy="183" r="7" fill="#C6F36B"/>
+</svg>
