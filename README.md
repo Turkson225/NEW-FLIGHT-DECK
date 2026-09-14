@@ -10,17 +10,17 @@ The dashboard includes DEMO simulation, LIVE read-only telemetry, REPLAY isolati
     cp .env.example .env
     npm run dev
 
-Set VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY, and optionally VITE_WORKSPACE_ID in .env for the new Supabase project.
+Set VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY, and optionally VITE_WORKSPACE_ID in .env for the existing FLIGHT-DECK Supabase project.
 
 Build locally with npm run build.
 
-## Create and connect the new Supabase project
+## Use the existing FLIGHT-DECK Supabase project
 
-1. Create a new Supabase project and copy its project URL and publishable browser key.
+1. Create a existing FLIGHT-DECK Supabase project and copy its project URL and publishable browser key.
 2. Run the schema in supabase/migrations/202609140001_new_flight_deck.sql with the Supabase SQL editor, or use the Supabase CLI.
 3. Deploy both Edge Functions:
 
-       supabase link --project-ref YOUR_PROJECT_REF
+       supabase link --project-ref zqhhoiqmnzmsrendkive
        supabase db push
        supabase functions deploy flight-api --no-verify-jwt
        supabase functions deploy telemetry-ingest --no-verify-jwt
