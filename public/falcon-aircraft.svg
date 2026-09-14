@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc">
+<title id="title">Falcon 01 fixed-wing aircraft</title><desc id="desc">Technical three-quarter illustration of the Flight Deck fixed-wing drone.</desc>
+<defs><linearGradient id="body" x1="366" y1="130" x2="780" y2="596" gradientUnits="userSpaceOnUse"><stop stop-color="#F3F7E8"/><stop offset=".42" stop-color="#ADB8A6"/><stop offset="1" stop-color="#4D5C54"/></linearGradient><linearGradient id="wing" x1="247" y1="255" x2="886" y2="539" gradientUnits="userSpaceOnUse"><stop stop-color="#C8D1C5"/><stop offset=".55" stop-color="#64736A"/><stop offset="1" stop-color="#26322C"/></linearGradient><linearGradient id="glass" x1="546" y1="157" x2="671" y2="289" gradientUnits="userSpaceOnUse"><stop stop-color="#C6F36B" stop-opacity=".85"/><stop offset="1" stop-color="#284D3A" stop-opacity=".9"/></linearGradient><filter id="shadow"><feGaussianBlur stdDeviation="18"/></filter></defs>
+<ellipse cx="603" cy="584" rx="348" ry="54" fill="#000" opacity=".32" filter="url(#shadow)"/>
+<path d="M592 103c34 1 58 26 67 65l56 249-70 154c-12 27-50 27-62 0l-65-154 46-250c7-39 16-65 28-64z" fill="url(#body)" stroke="#D6E1D4" stroke-opacity=".7" stroke-width="4"/>
+<path d="M553 297L147 455c-25 10-27 43-3 55l36 18 391-88-18-143z" fill="url(#wing)" stroke="#92A096" stroke-width="4"/>
+<path d="M658 301l398 158c26 10 28 43 4 55l-36 18-384-89 18-142z" fill="url(#wing)" stroke="#92A096" stroke-width="4"/>
+<path d="M576 221c19-56 64-60 90-7l17 77-118-1 11-69z" fill="url(#glass)" stroke="#C6F36B" stroke-opacity=".7" stroke-width="4"/>
+<path d="M559 469L380 572l-9 53 219-70-31-86z" fill="#56665C" stroke="#849187" stroke-width="4"/>
+<path d="M650 469l179 103 9 53-219-70 31-86z" fill="#56665C" stroke="#849187" stroke-width="4"/>
+<path d="M596 511l-29 98 39 37 41-37-28-98h-23z" fill="#39483F" stroke="#7A887E" stroke-width="4"/>
+<path d="M573 346h66" stroke="#FF9869" stroke-width="10" stroke-linecap="round"/>
+<path d="M235 481l299-91M971 484l-304-91" stroke="#C6F36B" stroke-width="6" stroke-linecap="round" opacity=".72"/>
+<circle cx="607" cy="122" r="8" fill="#FF9869"/><circle cx="607" cy="122" r="23" fill="none" stroke="#FF9869" stroke-opacity=".3"/>
+<g fill="#C6F36B" font-family="Arial,sans-serif" font-size="20" letter-spacing="4"><text x="88" y="197">FD-001</text><text x="878" y="184">FALCON 01</text></g>
+<g stroke="#C6F36B" stroke-opacity=".25" fill="none"><path d="M98 216h246l100 57"/><path d="M1110 204H852l-91 63"/></g>
+</svg>
