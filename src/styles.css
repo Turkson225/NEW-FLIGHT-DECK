@@ -243,6 +243,21 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--lime); outl
 .event-row span { color: var(--muted); font-size: 8px; margin-top: 3px; }
 .content-footer { border-top: 1px solid var(--line); margin-top: 27px; padding-top: 15px; display: flex; justify-content: space-between; color: #52626d; font-size: 7px; letter-spacing: .9px; }
 .content-footer span:last-child { display: flex; align-items: center; gap: 5px; letter-spacing: 0; }
+
+.signin-trigger { border: 0; cursor: pointer; }
+.auth-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 20px; background: rgba(3,7,10,.76); backdrop-filter: blur(8px); }
+.auth-modal { position: relative; width: min(420px, 100%); border: 1px solid rgba(198,243,107,.25); border-radius: 12px; padding: 28px; color: var(--soft); background: linear-gradient(145deg, #17232b, #0d141a); box-shadow: 0 28px 80px rgba(0,0,0,.55); }
+.auth-modal h2 { margin: 8px 0 7px; color: #f6f8f9; font-size: 25px; letter-spacing: -.6px; }
+.auth-copy { color: var(--muted); font-size: 11px; line-height: 1.55; margin: 0 0 18px; }
+.auth-close { position: absolute; top: 13px; right: 15px; border: 0; background: transparent; color: var(--muted); font-size: 23px; line-height: 1; cursor: pointer; }
+.auth-close:hover { color: #fff; }
+.auth-input { width: 100%; box-sizing: border-box; border: 1px solid var(--line-strong); border-radius: 6px; background: rgba(255,255,255,.035); color: #fff; padding: 11px 12px; font-size: 11px; margin-bottom: 10px; }
+.auth-input::placeholder { color: #687985; }
+.auth-modal .primary-button:disabled { opacity: .55; cursor: wait; }
+.auth-message { margin-top: 12px; border: 1px solid rgba(198,243,107,.2); border-radius: 6px; padding: 10px; color: var(--lime); background: rgba(198,243,107,.06); font-size: 10px; line-height: 1.45; }
+.auth-safety { display: block; margin-top: 15px; color: var(--muted); font-size: 8px; line-height: 1.5; }
+.auth-account { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 6px; padding: 11px 12px; color: var(--soft); font-size: 11px; margin: 14px 0; overflow-wrap: anywhere; }
+
 .toast { position: fixed; bottom: 19px; right: 22px; color: #d2dce1; background: #19232b; border: 1px solid var(--line-strong); border-radius: 6px; padding: 10px 13px; font-size: 9px; box-shadow: 0 14px 35px rgba(0,0,0,.4); z-index: 20; }
 .page-intro { margin: 8px 0 22px; }
 .page-intro h2 { margin: 0; font-size: 24px; letter-spacing: -.7px; }
