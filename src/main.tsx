@@ -1,91 +1,109 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
-type Page =
-  | "overview"
-  | "live"
-  | "sensors"
-  | "batteries"
-  | "radio"
-  | "preflight"
-  | "replay"
-  | "events"
-  | "settings";
-
+type Page = "overview" | "monitor" | "mixer" | "sensors" | "power" | "preflight" | "replay" | "settings";
 type Mode = "DEMO" | "LIVE" | "REPLAY";
+type ChartKey = "link" | "acceleration" | "angular";
 
 type Telemetry = {
-  time: string;
+  timestamp: string;
+  link: number;
+  battery: number;
+  voltage: number;
   pitch: number;
   roll: number;
-  gyro: number;
-  voltage: number | null;
-  battery: number | null;
-  signal: number | null;
-  temperature: number | null;
+  temperature: number;
+  acceleration: number[];
+  angular: number[];
 };
 
-const nav: Array<{ id: Page; label: string; icon: string; section: string }> = [
-  { id: "overview", label: "Overview", icon: "⌂", section: "OPERATIONS" },
-  { id: "live", label: "Live monitor", icon: "◉", section: "OPERATIONS" },
-  { id: "sensors", label: "Sensors", icon: "⌁", section: "AIRCRAFT" },
-  { id: "batteries", label: "Batteries", icon: "▣", section: "AIRCRAFT" },
-  { id: "radio", label: "Radio & links", icon: "⌁", section: "AIRCRAFT" },
-  { id: "preflight", label: "Preflight", icon: "✓", section: "FLIGHT" },
-  { id: "replay", label: "Replay", icon: "↺", section: "FLIGHT" },
-  { id: "events", label: "Event history", icon: "≡", section: "RECORDS" },
-  { id: "settings", label: "Settings", icon: "⚙", section: "SYSTEM" },
+const nav = [
+  { id: "overview" as Page, label: "Mission overview", icon: "⌂", section: "COMMAND" },
+  { id: "monitor" as Page, label: "Live flight monitor", icon: "◉", section: "COMMAND", badge: "LIVE" },
+  { id: "mixer" as Page, label: "Channels & mixer", icon: "≋", section: "CONTROL" },
+  { id: "sensors" as Page, label: "Sensors & calibration", icon: "⌁", section: "AIRCRAFT" },
+  { id: "power" as Page, label: "Power systems", icon: "▣", section: "AIRCRAFT" },
+  { id: "preflight" as Page, label: "Preflight checklist", icon: "✓", section: "OPERATIONS", badge: "6" },
+  { id: "replay" as Page, label: "Flight logs & replay", icon: "↺", section: "OPERATIONS" },
+  { id: "settings" as Page, label: "Profiles & settings", icon: "⚙", section: "SYSTEM" },
 ];
 
+const pageTitles: Record<Page, string> = {
+  overview: "Mission overview",
+  monitor: "Live flight monitor",
+  mixer: "Channels & mixer",
+  sensors: "Sensors & calibration",
+  power: "Power systems",
+  preflight: "Preflight checklist",
+  replay: "Flight logs & replay",
+  settings: "Profiles & settings",
+};
+
 const initialTelemetry: Telemetry = {
-  time: "—",
+  timestamp: "—",
+  link: 0,
+  battery: 0,
+  voltage: 0,
   pitch: 0,
   roll: 0,
-  gyro: 0,
-  voltage: null,
-  battery: null,
-  signal: null,
-  temperature: null,
+  temperature: 0,
+  acceleration: [0.08, 0.14, -0.98],
+  angular: [0.52, -0.41, -0.16],
 };
 
 function App() {
   const [page, setPage] = useState<Page>("overview");
   const [mode, setMode] = useState<Mode>("DEMO");
-  const [telemetry, setTelemetry] = useState<Telemetry>(initialTelemetry);
-  const [history, setHistory] = useState<number[]>([42, 45, 43, 49, 47, 53, 51, 56, 54, 59, 57, 61]);
+  const [telemetry, setTelemetry] = useState(initialTelemetry);
+  const [signal, setSignal] = useState<number[]>([82, 86, 84, 89, 87, 91, 88, 92, 90, 94, 91, 93, 96, 94, 95, 93, 96, 95]);
+  const [chart, setChart] = useState<ChartKey>("link");
+  const [mixEnabled, setMixEnabled] = useState(true);
+  const [throttle, setThrottle] = useState(64);
+  const [mixStrength, setMixStrength] = useState(58);
+  const [notifications, setNotifications] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [voice, setVoice] = useState(false);
   const [toast, setToast] = useState("DEMO simulator active");
-  const [checklist, setChecklist] = useState<Record<string, boolean>>({});
+  const [checks, setChecks] = useState<Record<string, boolean>>({
+    battery: true,
+    controls: true,
+    mixing: true,
+    sensors: true,
+    radio: true,
+    authorization: true,
+  });
 
   useEffect(() => {
     if (mode !== "DEMO") {
       setTelemetry(initialTelemetry);
-      setToast(mode === "LIVE" ? "LIVE is read-only — awaiting verified telemetry" : "REPLAY has no live control path");
+      setToast(mode === "LIVE" ? "LIVE is read-only — awaiting verified telemetry" : "REPLAY is isolated from hardware");
       return;
     }
 
-    const tick = () => {
+    const update = () => {
+      const seconds = Date.now() / 1000;
       const now = new Date();
-      const t = now.getTime() / 1000;
       const next: Telemetry = {
-        time: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-        pitch: Math.sin(t / 4) * 2.8,
-        roll: Math.cos(t / 5) * 5.4,
-        gyro: 0.8 + Math.abs(Math.sin(t / 3)) * 1.7,
-        voltage: 16.42 - (t % 600) / 6000,
-        battery: 92 - (t % 500) / 50,
-        signal: 86 + Math.sin(t / 7) * 8,
-        temperature: 28.4 + Math.sin(t / 9) * 1.1,
+        timestamp: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+        link: 92 + Math.sin(seconds / 4) * 4,
+        battery: 92 - (seconds % 600) / 65,
+        voltage: 16.42 - (seconds % 600) / 6000,
+        pitch: Math.sin(seconds / 4) * 2.9,
+        roll: Math.cos(seconds / 5) * 5.7,
+        temperature: 28.4 + Math.sin(seconds / 8) * 1.2,
+        acceleration: [Math.sin(seconds / 3) * 0.16, Math.cos(seconds / 4) * 0.18, -0.98 + Math.sin(seconds / 6) * 0.03],
+        angular: [Math.sin(seconds / 2) * 1.2, Math.cos(seconds / 3) * 0.8, Math.sin(seconds / 5) * 0.35],
       };
       setTelemetry(next);
-      setHistory((items) => [...items.slice(-17), Math.round(next.signal ?? 0)]);
-      setToast("DEMO simulator active");
+      setSignal((items) => [...items.slice(-23), Math.round(next.link)]);
+      setToast(recording ? "Recording telemetry · 10 Hz target" : "DEMO simulator active");
     };
 
-    tick();
-    const timer = window.setInterval(tick, 1000);
+    update();
+    const timer = window.setInterval(update, 1000);
     return () => window.clearInterval(timer);
-  }, [mode]);
+  }, [mode, recording]);
 
   const groupedNav = useMemo(() => {
     return nav.reduce<Record<string, typeof nav>>((groups, item) => {
@@ -94,310 +112,302 @@ function App() {
     }, {});
   }, []);
 
-  const checklistItems = [
-    ["airframe", "Airframe secured and propeller removed"],
-    ["power", "Power rails and battery divider verified"],
-    ["radio", "Transmitter and receiver link verified"],
-    ["imu", "MPU6050 detected at a verified address"],
-    ["failsafe", "Local receiver failsafe tested"],
-    ["authorization", "Local flight authorization confirmed"],
-  ];
-
-  const showToast = (message: string) => {
+  const notify = (message: string) => {
     setToast(message);
-    window.setTimeout(() => setToast("DEMO simulator active"), 2800);
+    window.setTimeout(() => setToast(mode === "DEMO" ? "DEMO simulator active" : "Station ready"), 3000);
+  };
+
+  const toggleCheck = (key: string) => {
+    setChecks((current) => ({ ...current, [key]: !current[key] }));
   };
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand">
+        <div className="brand-row">
           <div className="brand-mark">FD</div>
           <div>
             <div className="brand-name">FLIGHT DECK</div>
-            <div className="brand-subtitle">AIRCRAFT OPERATIONS</div>
+            <div className="brand-caption">AEROSPACE OPERATIONS</div>
           </div>
+          <button className="collapse-button" aria-label="Collapse navigation">‹</button>
         </div>
 
-        <div className="aircraft-selector">
+        <div className="aircraft-card-mini">
           <div className="eyebrow">ACTIVE AIRCRAFT</div>
-          <div className="aircraft-row">
-            <span className="status-dot green" />
-            <strong>FD-001</strong>
-            <span className="chevron">⌄</span>
+          <div className="aircraft-name-row">
+            <span className="aircraft-icon">✈</span>
+            <div><strong>Falcon 01</strong><span>FD-001 · Fixed-wing</span></div>
+            <span className="online-dot" />
           </div>
-          <span className="muted-small">Bench profile · fixed-wing</span>
+          <div className="profile-row"><span>Bench profile</span><span className="profile-chip">SIMULATOR</span></div>
         </div>
 
-        <nav className="nav">
+        <nav className="navigation">
           {Object.entries(groupedNav).map(([section, items]) => (
-            <div className="nav-group" key={section}>
-              <div className="nav-section">{section}</div>
+            <div className="nav-section-group" key={section}>
+              <div className="nav-section-label">{section}</div>
               {items.map((item) => (
                 <button
-                  className={page === item.id ? "nav-item active" : "nav-item"}
                   key={item.id}
+                  className={page === item.id ? "nav-link active" : "nav-link"}
                   onClick={() => setPage(item.id)}
                 >
-                  <span className="nav-icon">{item.icon}</span>
+                  <span className="nav-link-icon">{item.icon}</span>
                   <span>{item.label}</span>
-                  {item.id === "live" && <span className="live-pill">DEMO</span>}
+                  {item.badge && <span className={item.badge === "LIVE" ? "nav-badge live" : "nav-badge"}>{item.badge}</span>}
                 </button>
               ))}
             </div>
           ))}
         </nav>
 
-        <div className="sidebar-bottom">
-          <div className="safety-note">
-            <span className="shield">◇</span>
-            <div>
-              <strong>CONTROL LOCKED</strong>
-              <span>Browser actuator path disabled</span>
-            </div>
+        <div className="sidebar-footer">
+          <div className="control-lock">
+            <span className="lock-icon">◇</span>
+            <div><strong>LOCAL CONTROL FIRST</strong><span>Radio control stays onboard.</span></div>
           </div>
-          <div className="user-chip">
-            <div className="avatar">ET</div>
-            <div>
-              <strong>Operator</strong>
-              <span>Local session</span>
-            </div>
-            <span className="more">•••</span>
+          <div className="system-health">
+            <div className="system-health-top"><span className="online-dot" /> Station healthy <span>v0.1</span></div>
+            <div className="health-bars"><i /><i /><i /><i /><i /></div>
+          </div>
+          <div className="operator">
+            <div className="operator-avatar">ET</div>
+            <div><strong>Ennis Turkson</strong><span>Owner · verified</span></div>
+            <span className="operator-more">•••</span>
           </div>
         </div>
       </aside>
 
-      <main className="main">
+      <main className="main-content">
         <header className="topbar">
-          <div>
-            <div className="breadcrumb">FLIGHT DECK <span>/</span> {page.replace("-", " ")}</div>
-            <h1>{pageTitle(page)}</h1>
+          <div className="topbar-left">
+            <button className="mobile-menu" aria-label="Open menu">☰</button>
+            <div className="breadcrumb">FLIGHT OPERATIONS <span>/</span> {pageTitles[page]}</div>
+            <h1>{pageTitles[page]}</h1>
           </div>
-          <div className="topbar-actions">
-            <div className="connection-badge">
-              <span className="status-dot green" />
-              Simulator linked
-            </div>
-            <div className="mode-switcher" aria-label="Operating mode">
+          <div className="topbar-right">
+            <div className="verified-pill"><span className="online-dot" /> Verified account</div>
+            <div className="mode-control">
               {(["DEMO", "LIVE", "REPLAY"] as Mode[]).map((item) => (
-                <button
-                  key={item}
-                  className={mode === item ? "mode-button selected" : "mode-button"}
-                  onClick={() => setMode(item)}
-                >
-                  {item}
-                </button>
+                <button key={item} className={mode === item ? "mode-tab selected" : "mode-tab"} onClick={() => setMode(item)}>{item}</button>
               ))}
             </div>
-            <button className="icon-button" onClick={() => showToast("No new alerts")} aria-label="Notifications">♢</button>
+            <button className={recording ? "record-button active" : "record-button"} onClick={() => { setRecording(!recording); notify(recording ? "Recording stopped" : "Recording started"); }}>
+              <span className={recording ? "record-dot pulse" : "record-dot"} /> {recording ? "Recording" : "Record"}
+            </button>
+            <button className={notifications ? "top-icon-button selected" : "top-icon-button"} onClick={() => setNotifications(!notifications)} aria-label="Notifications">♢</button>
             <div className="top-avatar">ET</div>
           </div>
         </header>
 
         <div className="content">
-          {page === "overview" && <Overview telemetry={telemetry} history={history} onNavigate={setPage} onAction={showToast} />}
-          {page === "live" && <LiveMonitor telemetry={telemetry} mode={mode} onAction={showToast} />}
-          {page === "sensors" && <Sensors telemetry={telemetry} />}
-          {page === "batteries" && <Batteries telemetry={telemetry} />}
-          {page === "radio" && <Radio mode={mode} telemetry={telemetry} />}
-          {page === "preflight" && (
-            <Preflight
-              items={checklistItems}
-              values={checklist}
-              onToggle={(key) => setChecklist((current) => ({ ...current, [key]: !current[key] }))}
-              onAction={showToast}
+          <div className="context-bar">
+            <div className="context-status"><span className="status-led green" /><strong>{mode === "DEMO" ? "Simulator linked" : mode === "LIVE" ? "Aircraft stale" : "Replay isolated"}</strong><span>Falcon 01 · FD-001</span></div>
+            <div className="context-actions">
+              <button className="outline-button" onClick={() => notify("Control path is locked in the browser")}>◇ Parachute</button>
+              <button className="outline-button" onClick={() => setVoice(!voice)}>{voice ? "◉ Voice on" : "◌ Voice off"}</button>
+              <button className="outline-button" onClick={() => notify("No new alerts")}>Alerts <span className="alert-count">3</span></button>
+            </div>
+          </div>
+
+          {notifications && <div className="notification-drawer"><strong>Station notifications</strong><span>All current alerts are simulator-only. No live device telemetry is verified.</span><button onClick={() => setNotifications(false)}>Dismiss</button></div>}
+
+          {page === "overview" && (
+            <Overview
+              telemetry={telemetry}
+              signal={signal}
+              chart={chart}
+              setChart={setChart}
+              mixEnabled={mixEnabled}
+              setMixEnabled={setMixEnabled}
+              throttle={throttle}
+              setThrottle={setThrottle}
+              mixStrength={mixStrength}
+              setMixStrength={setMixStrength}
+              onNavigate={setPage}
+              notify={notify}
             />
           )}
-          {page === "replay" && <Replay onAction={showToast} />}
-          {page === "events" && <Events />}
-          {page === "settings" && <Settings onAction={showToast} />}
-        </div>
+          {page === "monitor" && <Monitor telemetry={telemetry} signal={signal} mode={mode} onAction={notify} />}
+          {page === "mixer" && <Mixer mixEnabled={mixEnabled} setMixEnabled={setMixEnabled} throttle={throttle} setThrottle={setThrottle} mixStrength={mixStrength} setMixStrength={setMixStrength} onAction={notify} />}
+          {page === "sensors" && <Sensors telemetry={telemetry} onAction={notify} />}
+          {page === "power" && <Power telemetry={telemetry} />}
+          {page === "preflight" && <Preflight checks={checks} toggleCheck={toggleCheck} onAction={notify} />}
+          {page === "replay" && <Replay onAction={notify} />}
+          {page === "settings" && <Settings onAction={notify} />}
 
+          <footer className="content-footer"><span>FLIGHT DECK / ENGINEERING CONSOLE</span><span><span className="status-led green" /> Local control first · Browser actuator path disabled</span></footer>
+        </div>
         <div className="toast">{toast}</div>
       </main>
     </div>
   );
 }
 
-function pageTitle(page: Page) {
-  return {
-    overview: "Mission overview",
-    live: "Live flight monitor",
-    sensors: "Sensors & calibration",
-    batteries: "Battery systems",
-    radio: "Radio & connectivity",
-    preflight: "Preflight checklist",
-    replay: "Sessions & replay",
-    events: "Event history",
-    settings: "Profiles & settings",
-  }[page];
-}
-
-function Overview({ telemetry, history, onNavigate, onAction }: { telemetry: Telemetry; history: number[]; onNavigate: (page: Page) => void; onAction: (text: string) => void }) {
+function Overview(props: {
+  telemetry: Telemetry;
+  signal: number[];
+  chart: ChartKey;
+  setChart: (value: ChartKey) => void;
+  mixEnabled: boolean;
+  setMixEnabled: (value: boolean) => void;
+  throttle: number;
+  setThrottle: (value: number) => void;
+  mixStrength: number;
+  setMixStrength: (value: number) => void;
+  onNavigate: (page: Page) => void;
+  notify: (message: string) => void;
+}) {
+  const { telemetry, signal, chart, setChart, mixEnabled, setMixEnabled, throttle, setThrottle, mixStrength, setMixStrength, onNavigate, notify } = props;
+  const leftAileron = Math.round(1500 + (mixEnabled ? (mixStrength * 1.5) : 86));
+  const rightAileron = Math.round(1500 - (mixEnabled ? (mixStrength * 1.5) : 86));
   return (
     <>
-      <div className="hero-strip">
-        <div>
-          <div className="eyebrow lime">FLIGHT READINESS</div>
-          <h2>Bench simulation ready</h2>
-          <p>Telemetry is simulated locally. Real aircraft authorization remains onboard.</p>
+      <section className="mission-hero">
+        <div className="hero-copy">
+          <div className="eyebrow lime">MISSION CONTROL · DEMO ENVIRONMENT</div>
+          <h2>Operational clarity<br /><em>at every altitude.</em></h2>
+          <p>Observe the aircraft system, validate control surfaces, and keep flight-critical decisions onboard.</p>
+          <div className="hero-buttons"><button className="primary-button" onClick={() => onNavigate("preflight")}>Open preflight <span>→</span></button><button className="ghost-button" onClick={() => notify("Live aircraft control is intentionally locked")}>Review control boundary <span>◇</span></button></div>
         </div>
-        <div className="hero-actions">
-          <button className="button primary" onClick={() => onNavigate("preflight")}>Open preflight <span>→</span></button>
-          <button className="button ghost" onClick={() => onAction("Flight controls remain locked in the browser")}>Control boundary <span>◇</span></button>
+        <div className="hero-orbit">
+          <div className="orbit-ring ring-one" /><div className="orbit-ring ring-two" /><div className="orbit-ring ring-three" />
+          <div className="hero-drone"><span className="drone-nose" /><span className="drone-wing left" /><span className="drone-wing right" /><span className="drone-tail" /></div>
+          <div className="orbit-label label-top">FD-001</div><div className="orbit-label label-right">BENCH / 01</div><div className="orbit-label label-bottom">NOMINAL</div>
         </div>
-      </div>
+        <div className="hero-readiness"><span>READINESS</span><strong>STANDBY</strong><small>Telemetry simulated</small><div className="readiness-track"><i /></div><button onClick={() => onNavigate("preflight")}>6/6 operator gates →</button></div>
+      </section>
 
-      <div className="metric-grid">
-        <Metric label="AIRCRAFT STATUS" value="STANDBY" sub="FD-001 · local bench" tone="lime" icon="✦" />
-        <Metric label="TELEMETRY" value={telemetry.time === "—" ? "UNKNOWN" : "LIVE DEMO"} sub={telemetry.time === "—" ? "No verified source" : telemetry.time} tone="orange" icon="⌁" />
-        <Metric label="FLIGHT MODE" value="MANUAL" sub="Surface presets only" tone="blue" icon="◒" />
-        <Metric label="CONTROL PATH" value="LOCKED" sub="No browser actuator transport" tone="red" icon="◇" />
-      </div>
+      <section className="kpi-grid">
+        <Kpi icon="⌁" label="TELEMETRY" value="LIVE DEMO" detail={telemetry.timestamp} accent="lime" trend="+ stable" />
+        <Kpi icon="◉" label="LINK QUALITY" value={Math.round(telemetry.link) + "%"} detail="nRF24 status · nominal" accent="blue" trend="+4.2%" />
+        <Kpi icon="▣" label="AIRCRAFT BATTERY" value={telemetry.voltage.toFixed(2) + " V"} detail={Math.round(telemetry.battery) + "% estimated"} accent="orange" trend="- 0.2 V" />
+        <Kpi icon="◒" label="ATTITUDE" value={telemetry.pitch.toFixed(1) + "°"} detail="Pitch · Roll " + telemetry.roll.toFixed(1) + "°" accent="violet" trend="steady" />
+        <Kpi icon="◇" label="CONTROL PATH" value="LOCKED" detail="Local receiver owns control" accent="red" trend="protected" />
+      </section>
 
-      <div className="dashboard-grid">
-        <Panel title="Telemetry health" eyebrow="LAST 60 SECONDS" action="View monitor" onAction={() => onNavigate("live")}>
-          <div className="chart-wrap">
-            <div className="chart-value">{telemetry.signal == null ? "—" : Math.round(telemetry.signal)}<span>%</span></div>
-            <div className="chart-label">LINK QUALITY</div>
-            <Sparkline values={history} />
-            <div className="chart-axis"><span>60s ago</span><span>30s</span><span>now</span></div>
-          </div>
-          <div className="health-row">
-            <HealthItem label="Radio link" value={telemetry.signal == null ? "Unknown" : "Nominal"} tone="lime" />
-            <HealthItem label="IMU stream" value={telemetry.time === "—" ? "Unknown" : "Nominal"} tone="lime" />
-            <HealthItem label="Battery" value={telemetry.battery == null ? "Unknown" : "Nominal"} tone="lime" />
-          </div>
+      <section className="dashboard-columns">
+        <Panel eyebrow="SYSTEM TELEMETRY · 60 SECOND WINDOW" title="Station signal overview" action="Open monitor →" onAction={() => onNavigate("monitor")} wide>
+          <div className="chart-toolbar"><div className="chart-stat"><strong>{chart === "link" ? Math.round(telemetry.link) + "%" : chart === "acceleration" ? telemetry.acceleration[2].toFixed(2) + " g" : telemetry.angular[0].toFixed(2) + "°/s"}</strong><span>{chart === "link" ? "LINK QUALITY" : chart === "acceleration" ? "RAW ACCELERATION · Z" : "ANGULAR VELOCITY · X"}</span></div><div className="chart-tabs">{(["link", "acceleration", "angular"] as ChartKey[]).map((item) => <button className={chart === item ? "chart-tab selected" : "chart-tab"} key={item} onClick={() => setChart(item)}>{item === "link" ? "Link" : item === "acceleration" ? "Acceleration" : "Angular velocity"}</button>)}</div></div>
+          <TelemetryChart values={chart === "link" ? signal : chart === "acceleration" ? signal.map((_, i) => 55 + Math.sin(i / 2) * 17) : signal.map((_, i) => 50 + Math.cos(i / 2.4) * 14)} color={chart === "link" ? "lime" : chart === "acceleration" ? "orange" : "blue"} />
+          <div className="chart-footer"><span>11:33:17</span><span>11:33:37</span><span>11:33:57</span><span>NOW · {telemetry.timestamp}</span></div>
         </Panel>
 
-        <Panel title="Aircraft profile" eyebrow="FD-001 · FIXED-WING">
-          <div className="aircraft-card">
-            <div className="aircraft-visual"><div className="aircraft-line" /><div className="aircraft-body" /><div className="aircraft-wing left" /><div className="aircraft-wing right" /><div className="aircraft-tail" /></div>
-            <div className="aircraft-details">
-              <div><span>PROFILE</span><strong>Bench / fixed-wing</strong></div>
-              <div><span>RADIO</span><strong>nRF24L01+ · 2.4 GHz</strong></div>
-              <div><span>COMPUTE</span><strong>Nano + NodeMCU</strong></div>
-            </div>
+        <Panel eyebrow="AIRCRAFT DIGITAL TWIN" title="Falcon 01" action="Configure →" onAction={() => onNavigate("settings")}>
+          <div className="aircraft-twin">
+            <div className="twin-grid" /><div className="twin-drone"><span className="twin-nose" /><span className="twin-wing left" /><span className="twin-wing right" /><span className="twin-tail left" /><span className="twin-tail right" /></div>
+            <div className="twin-label top">PITCH {telemetry.pitch.toFixed(1)}°</div><div className="twin-label right">ROLL {telemetry.roll.toFixed(1)}°</div><div className="twin-label bottom">IMU · 0x68</div>
           </div>
-          <button className="text-button" onClick={() => onNavigate("settings")}>Configure profile <span>→</span></button>
+          <div className="twin-meta"><div><span>PROFILE</span><strong>Fixed-wing / custom</strong></div><div><span>RADIO</span><strong>nRF24L01+ · 2.4 GHz</strong></div><div><span>COMPUTE</span><strong>Nano + NodeMCU</strong></div></div>
         </Panel>
-      </div>
+      </section>
 
-      <div className="section-heading">
-        <div><div className="eyebrow">CURRENT STATE</div><h3>Operating snapshot</h3></div>
-        <span className="updated">Updated {telemetry.time}</span>
-      </div>
-      <div className="snapshot-grid">
-        <Snapshot title="ATTITUDE" value={telemetry.pitch === 0 && telemetry.roll === 0 ? "0.0°" : `${telemetry.pitch.toFixed(1)}°`} detail={`Pitch · Roll ${telemetry.roll.toFixed(1)}°`} icon="◒" />
-        <Snapshot title="AIRCRAFT VOLTAGE" value={telemetry.voltage == null ? "Unknown" : `${telemetry.voltage.toFixed(2)} V`} detail="Divider verification required" icon="▣" />
-        <Snapshot title="IMU TEMPERATURE" value={telemetry.temperature == null ? "Unknown" : `${telemetry.temperature.toFixed(1)} °C`} detail="MPU6050 chip temperature" icon="♨" />
-        <Snapshot title="LAST EVENT" value="System ready" detail="No active warnings" icon="✓" />
-      </div>
+      <div className="section-title-row"><div><div className="eyebrow">CONTROL SYSTEM</div><h3>Channels & mixer</h3></div><button className="text-button" onClick={() => onNavigate("mixer")}>Open full mixer →</button></div>
+      <section className="dashboard-columns control-columns">
+        <Panel eyebrow="INTERACTIVE SIMULATOR" title="Physical controller inputs">
+          <div className="joysticks"><Joystick label="JOYSTICK 1" x="0.03" y="0.09" /><Joystick label="JOYSTICK 2" x="0.23" y="0.58" active /></div>
+          <RangeRow label="Throttle slider · A6" value={throttle} setValue={setThrottle} suffix="%" />
+          <div className="pot-row"><span>Potentiometer 1 · A4</span><b>42%</b><span>Potentiometer 2 · A5</span><b>68%</b></div>
+        </Panel>
+        <Panel eyebrow="COMMANDED POSITION" title={mixEnabled ? "Roll mixing · active" : "Independent ailerons"}>
+          <div className="aileron-view"><div className="aileron-readout"><span>LEFT AILERON<strong>{leftAileron} <small>µs</small></strong></span><span>RIGHT AILERON<strong>{rightAileron} <small>µs</small></strong></span></div><div className="plane-control"><span className="plane-body" /><span className="plane-wing left" /><span className="plane-wing right" /><span className="plane-tail" /></div></div>
+          <div className="mix-rule"><span>L = common + roll</span><span>R = common − roll</span></div>
+          <RangeRow label="Mix strength" value={mixStrength} setValue={setMixStrength} suffix="%" />
+          <div className="switch-row"><span><i className="status-led green" /> Aileron mixing</span><button className={mixEnabled ? "toggle on" : "toggle"} onClick={() => setMixEnabled(!mixEnabled)}><i /></button><b>{mixEnabled ? "MIX ON" : "MIX OFF"}</b></div>
+        </Panel>
+      </section>
+
+      <section className="lower-grid">
+        <Panel eyebrow="SYSTEM HEALTH" title="Operational status"><HealthRow label="MPU6050 telemetry" value="Nominal" detail="0x68 · 10 Hz target" tone="green" /><HealthRow label="Control radio" value="Nominal" detail="nRF24 · 250 kbps" tone="green" /><HealthRow label="Aircraft battery" value="Advisory" detail="Divider calibration pending" tone="orange" /><HealthRow label="Cloud gateway" value="Not connected" detail="Live source required" tone="gray" /></Panel>
+        <Panel eyebrow="EVENT STREAM" title="Recent events" action="View history →" onAction={() => onNavigate("replay")}><EventRow time="11:34:06" title="Simulator sample received" detail="Telemetry synchronized · 600 samples" tone="green" /><EventRow time="11:33:58" title="Mixing confirmed" detail={mixEnabled ? "Aircraft-confirmed mix state is ON" : "Aircraft-confirmed mix state is OFF"} tone="blue" /><EventRow time="11:33:41" title="Control path locked" detail="Browser actuator transport disabled" tone="orange" /></Panel>
+      </section>
     </>
   );
 }
 
-function LiveMonitor({ telemetry, mode, onAction }: { telemetry: Telemetry; mode: Mode; onAction: (text: string) => void }) {
-  return (
-    <>
-      <div className="page-alert">
-        <span className="alert-icon">◇</span>
-        <div><strong>{mode === "LIVE" ? "LIVE telemetry is not verified" : mode === "REPLAY" ? "Replay is isolated from hardware" : "DEMO telemetry is simulated"}</strong><span>{mode === "LIVE" ? "Connect an authenticated device stream before relying on values." : "This page cannot send, queue, or replay actuator commands."}</span></div>
-      </div>
-      <div className="live-layout">
-        <Panel title="Attitude reference" eyebrow="MPU6050 · COMPLEMENTARY FILTER">
-          <div className="attitude-display">
-            <div className="horizon"><div className="horizon-sky" /><div className="horizon-ground" /><div className="horizon-line" style={{ transform: `rotate(${telemetry.roll}deg) translateY(${telemetry.pitch * 4}px)` }} /><div className="aircraft-symbol">—╋—</div></div>
-            <div className="attitude-values"><ValueBlock label="PITCH" value={telemetry.time === "—" ? "Unknown" : `${telemetry.pitch.toFixed(1)}°`} /><ValueBlock label="ROLL" value={telemetry.time === "—" ? "Unknown" : `${telemetry.roll.toFixed(1)}°`} /><ValueBlock label="YAW" value="Not available" /></div>
-          </div>
-        </Panel>
-        <Panel title="Flight instruments" eyebrow="CURRENT SAMPLE">
-          <div className="instrument-list">
-            <Instrument label="Gyroscope" value={telemetry.gyro == null ? "Unknown" : `${telemetry.gyro.toFixed(2)} °/s`} state="NOMINAL" />
-            <Instrument label="Temperature" value={telemetry.temperature == null ? "Unknown" : `${telemetry.temperature.toFixed(1)} °C`} state="NOMINAL" />
-            <Instrument label="Battery" value={telemetry.battery == null ? "Unknown" : `${telemetry.battery.toFixed(0)} %`} state="NOMINAL" />
-            <Instrument label="Freshness" value={telemetry.time === "—" ? "Unknown" : "1.0 s"} state={telemetry.time === "—" ? "UNKNOWN" : "FRESH"} />
-          </div>
-          <button className="button locked" onClick={() => onAction("Rejected: browser live command transport is disabled")}>◇ Commands locked</button>
-        </Panel>
-      </div>
-    </>
-  );
+function Monitor({ telemetry, signal, mode, onAction }: { telemetry: Telemetry; signal: number[]; mode: Mode; onAction: (message: string) => void }) {
+  return <><PageIntro eyebrow={"FLIGHT OPERATIONS / " + mode} title="Live flight monitor" text="A high-density view of aircraft attitude, sensor health, link freshness, and system boundaries." /><div className="alert-banner"><span className="warning-symbol">△</span><div><strong>{mode === "LIVE" ? "LIVE telemetry is stale" : mode === "REPLAY" ? "Replay is isolated from hardware" : "DEMO telemetry is simulated"}</strong><span>{mode === "LIVE" ? "No verified device sample has reached the station. Current condition is unknown." : "This station cannot queue, replay, or dispatch actuator commands from the browser."}</span></div></div><section className="dashboard-columns"><Panel eyebrow="ATTITUDE REFERENCE" title="Artificial horizon" wide><div className="monitor-attitude"><div className="horizon-large"><div className="horizon-sky" /><div className="horizon-ground" /><div className="horizon-line" style={{ transform: "rotate(" + telemetry.roll + "deg) translateY(" + telemetry.pitch * 5 + "px)" }} /><div className="horizon-aircraft">—╋—</div></div><div className="attitude-readouts"><Readout label="PITCH" value={mode === "LIVE" ? "Unknown" : telemetry.pitch.toFixed(1) + "°"} /><Readout label="ROLL" value={mode === "LIVE" ? "Unknown" : telemetry.roll.toFixed(1) + "°"} /><Readout label="YAW" value="Not available" /><Readout label="SAMPLE AGE" value={mode === "DEMO" ? "1.0 s" : "Stale"} /></div></div></Panel><Panel eyebrow="CURRENT SAMPLE" title="Flight instruments"><Instrument label="Link quality" value={mode === "LIVE" ? "Unknown" : Math.round(telemetry.link) + "%"} state="NOMINAL" /><Instrument label="Aircraft battery" value={mode === "LIVE" ? "Unknown" : telemetry.voltage.toFixed(2) + " V"} state="ADVISORY" /><Instrument label="IMU temperature" value={mode === "LIVE" ? "Unknown" : telemetry.temperature.toFixed(1) + " °C"} state="NOMINAL" /><Instrument label="Control transport" value="Disabled" state="LOCKED" /><button className="locked-button" onClick={() => onAction("Rejected: browser live command transport is disabled")}>◇ Commands locked</button></Panel></section><Panel eyebrow="LINK QUALITY · SYNCHRONIZED TELEMETRY" title="Signal history"><TelemetryChart values={signal} color="lime" /><div className="chart-footer"><span>60s ago</span><span>30s</span><span>10s</span><span>NOW · {telemetry.timestamp}</span></div></Panel></>;
 }
 
-function Sensors({ telemetry }: { telemetry: Telemetry }) {
-  const rows = [
-    ["MPU6050", telemetry.time === "—" ? "Unknown" : "Detected", telemetry.time === "—" ? "No sample" : "0x68 · I²C"],
-    ["Accelerometer", telemetry.time === "—" ? "Unknown" : "Streaming", telemetry.time === "—" ? "—" : "X/Y/Z m/s²"],
-    ["Gyroscope", telemetry.time === "—" ? "Unknown" : "Streaming", telemetry.time === "—" ? "—" : "X/Y/Z deg/s"],
-    ["Barometer", "Not installed", "No BMP280 source"],
-    ["GPS", "Not installed", "No position source"],
-    ["Battery divider", "Not verified", "Values remain advisory"],
-  ];
-  return <><PageIntro eyebrow="AIRCRAFT DATA" title="Sensors & calibration" text="Only measurements with a verified source are shown as measurements. Missing hardware is deliberately visible." /><Panel title="Sensor inventory" eyebrow="FD-001"><div className="table">{rows.map(([name, state, detail]) => <div className="table-row" key={name}><strong>{name}</strong><span className={state === "Streaming" || state === "Detected" ? "tag green-tag" : "tag gray-tag"}>{state}</span><span className="table-detail">{detail}</span><button className="small-link">Inspect</button></div>)}</div></Panel></>;
+function Mixer({ mixEnabled, setMixEnabled, throttle, setThrottle, mixStrength, setMixStrength, onAction }: { mixEnabled: boolean; setMixEnabled: (v: boolean) => void; throttle: number; setThrottle: (v: number) => void; mixStrength: number; setMixStrength: (v: number) => void; onAction: (message: string) => void }) {
+  return <><PageIntro eyebrow="FLIGHT OPERATIONS / DEMO" title="Channels & mixer" text="Trace every input. Understand every output. These are commanded PWM references, not measured servo angles." /><div className="mix-toolbar"><div className="preset-select">Gentle roll & pitch <span>⌄</span></div><button className="outline-button" onClick={() => onAction("Configuration saved locally for this session")}>▣ Save changes</button><button className="primary-button" onClick={() => onAction("Session recording started")}>● Record session</button></div><div className="mix-state-banner"><strong>{mixEnabled ? "Roll mixing" : "Independent ailerons"}</strong><span className="mix-confirmed">{mixEnabled ? "MIX ON" : "MIX OFF"}</span><small>Requested v1 / Simulator confirmed {mixEnabled ? "1" : "0"}</small></div><section className="dashboard-columns"><Panel eyebrow="INTERACTIVE SIMULATOR" title="Physical controller inputs" wide><div className="joysticks large"><Joystick label="JOYSTICK 1" x="0.03" y="0.09" /><Joystick label="JOYSTICK 2" x="0.23" y="0.58" active /></div><RangeRow label="Throttle slider · A6" value={throttle} setValue={setThrottle} suffix="%" /><div className="pot-row"><span>Potentiometer 1 · A4</span><b>42%</b><span>Potentiometer 2 · A5</span><b>68%</b></div></Panel><Panel eyebrow="COMMANDED POSITION" title="Aileron mixing"><div className="aileron-large"><div className="aileron-readout"><span>LEFT AILERON<strong>{Math.round(1500 + (mixEnabled ? mixStrength * 1.5 : 86))} <small>µs</small></strong></span><span>RIGHT AILERON<strong>{Math.round(1500 - (mixEnabled ? mixStrength * 1.5 : 86))} <small>µs</small></strong></span></div><div className="plane-control large-plane"><span className="plane-body" /><span className="plane-wing left" /><span className="plane-wing right" /><span className="plane-tail" /></div></div><div className="mix-rule"><span>L = common + roll</span><span>R = common − roll</span></div><RangeRow label="Mix strength" value={mixStrength} setValue={setMixStrength} suffix="%" /><div className="switch-row"><span><i className="status-led green" /> Aileron mixing</span><button className={mixEnabled ? "toggle on" : "toggle"} onClick={() => setMixEnabled(!mixEnabled)}><i /></button><b>{mixEnabled ? "MIX ON" : "MIX OFF"}</b></div></Panel></section><div className="channel-table"><div className="table-header"><span>CHANNEL</span><span>FUNCTION</span><span>INPUT</span><span>COMMAND</span><span>STATE</span></div><ChannelRow number="CH1" name="Elevator" input="Joystick 1 Y" command="1509 µs" /><ChannelRow number="CH2" name="Rudder" input="Joystick 1 X" command="1497 µs" /><ChannelRow number="CH3" name="Left aileron" input="Joystick 2 X" command="1586 µs" /><ChannelRow number="CH4" name="Right aileron" input="Joystick 2 Y" command="1414 µs" /><ChannelRow number="CH5" name="Throttle" input="Slider · A6" command={throttle + "%"} /><ChannelRow number="CH8" name="Parachute" input="Guarded event" command="LOCKED" warning /></div></>;
 }
 
-function Batteries({ telemetry }: { telemetry: Telemetry }) {
-  return <><PageIntro eyebrow="POWER SYSTEMS" title="Battery systems" text="Battery status stays Unknown until the physical divider, ground, calibration, and full-scale behavior are verified." /><div className="battery-layout"><Panel title="Aircraft battery" eyebrow="A0 · NODEMCU"><div className="battery-visual"><div className="battery-percent">{telemetry.battery == null ? "Unknown" : `${telemetry.battery.toFixed(0)}%`}</div><div className="battery-bar"><div style={{ width: `${telemetry.battery ?? 0}%` }} /></div><div className="battery-meta"><span>Voltage</span><strong>{telemetry.voltage == null ? "Unknown" : `${telemetry.voltage.toFixed(2)} V`}</strong></div><div className="battery-meta"><span>Calibration</span><strong className="orange-text">Not verified</strong></div></div></Panel><Panel title="Safety notes" eyebrow="REQUIRED BEFORE FLIGHT"><div className="note-list"><div>• Never connect battery voltage directly to A0.</div><div>• A saturated ADC reading invalidates the sample.</div><div>• Use a physically measured divider ratio.</div><div>• Do not treat browser values as a flight interlock.</div></div></Panel></div></>;
+function Sensors({ telemetry, onAction }: { telemetry: Telemetry; onAction: (message: string) => void }) {
+  return <><PageIntro eyebrow="AIRCRAFT DATA" title="Sensors & calibration" text="Know what is measured, what is inferred, and what remains unknown. Calibration requires a stationary, disarmed aircraft." /><div className="sensor-kpis"><Kpi icon="⌁" label="IMU STATUS" value="DETECTED" detail="MPU6050 · 0x68" accent="lime" trend="10 Hz target" /><Kpi icon="◒" label="ATTITUDE FILTER" value="COMPLEMENTARY" detail="Pitch and roll only" accent="blue" trend="Advisory" /><Kpi icon="♨" label="TEMPERATURE" value={telemetry.temperature.toFixed(1) + " °C"} detail="Chip temperature" accent="orange" trend="Nominal" /></div><section className="dashboard-columns"><Panel eyebrow="RAW ACCELERATION · g" title="Accelerometer history" wide><TelemetryChart values={telemetry.acceleration.map((v, i) => 50 + v * 30 + i)} color="orange" /><div className="chart-footer"><span>X · {telemetry.acceleration[0].toFixed(3)}</span><span>Y · {telemetry.acceleration[1].toFixed(3)}</span><span>Z · {telemetry.acceleration[2].toFixed(3)}</span><span>Current sample</span></div></Panel><Panel eyebrow="SENSOR INVENTORY" title="Connected sources"><SensorRow name="MPU6050" state="Streaming" detail="I²C address 0x68" /><SensorRow name="Accelerometer" state="Streaming" detail="X / Y / Z · m/s²" /><SensorRow name="Gyroscope" state="Streaming" detail="X / Y / Z · deg/s" /><SensorRow name="GPS" state="Not installed" detail="No position source" /><SensorRow name="Battery divider" state="Not verified" detail="Values advisory" /></Panel></section><Panel eyebrow="MOUNTING & CALIBRATION" title="IMU alignment"><div className="calibration-row"><div className="orientation-box"><span>Requested mounting orientation</span><strong>X forward · Y right · Z down <span>⌄</span></strong><small>Saved orientation does not automatically reorient firmware readings.</small></div><div className="calibration-action"><span>No console calibration record</span><button className="primary-button" onClick={() => onAction("Calibration requires stationary, disarmed, explicitly supported firmware")}>Calibrate stationary IMU</button></div></div></Panel></>;
 }
 
-function Radio({ mode, telemetry }: { mode: Mode; telemetry: Telemetry }) {
-  return <><PageIntro eyebrow="LINK HEALTH" title="Radio & connectivity" text="The aircraft control link remains local. Cloud connectivity is for monitoring and cannot become a timing dependency for control." /><div className="metric-grid"><Metric label="CONTROL RADIO" value="nRF24L01+" sub="Local receiver path" tone="lime" icon="⌁" /><Metric label="LINK QUALITY" value={telemetry.signal == null ? "Unknown" : `${telemetry.signal.toFixed(0)}%`} sub="Simulator value" tone="blue" icon="◉" /><Metric label="CLOUD PATH" value={mode === "DEMO" ? "SIMULATED" : "NOT CONNECTED"} sub="No retained commands" tone="orange" icon="↗" /></div><Panel title="Connectivity layers" eyebrow="SEPARATE RESPONSIBILITIES"><div className="link-layers"><LinkLayer name="Transmitter → receiver" value="Local control link" state="Independent of dashboard" /><LinkLayer name="Receiver → NodeMCU" value="UART 38400 8N1" state="Monitoring bridge" /><LinkLayer name="NodeMCU → cloud" value="Optional HTTPS telemetry" state="Not a control path" /></div></Panel></>;
+function Power({ telemetry }: { telemetry: Telemetry }) {
+  return <><PageIntro eyebrow="AIRCRAFT SYSTEMS" title="Power systems" text="Battery status remains advisory until the physical divider, ground, calibration, and full-scale behavior are verified." /><div className="power-grid"><Panel eyebrow="AIRCRAFT BATTERY" title="Main propulsion pack"><div className="battery-big"><strong>{telemetry.voltage.toFixed(2)} <small>V</small></strong><div className="battery-bar"><i style={{ width: telemetry.battery + "%" }} /></div><div className="battery-detail"><span>Estimated state</span><b>{Math.round(telemetry.battery)}%</b></div><div className="battery-detail"><span>Calibration</span><b className="orange-text">Not verified</b></div></div></Panel><Panel eyebrow="SAFETY LIMITS" title="Power observations"><HealthRow label="ADC saturation" value="Clear" detail="A0 below full scale" tone="green" /><HealthRow label="Voltage divider" value="Advisory" detail="Physical verification required" tone="orange" /><HealthRow label="Low-voltage cutoff" value="Onboard only" detail="Not controlled by browser" tone="blue" /></Panel></div><div className="note-card"><span>◇</span><div><strong>Power is a flight-critical boundary</strong><p>Never connect a battery directly to NodeMCU A0 or Nano analog inputs. Use a measured divider and confirm the ratio with a multimeter before enabling alerts.</p></div></div></>;
 }
 
-function Preflight({ items, values, onToggle, onAction }: { items: string[][]; values: Record<string, boolean>; onToggle: (key: string) => void; onAction: (text: string) => void }) {
-  const complete = items.filter(([key]) => values[key]).length;
-  return <><PageIntro eyebrow="FLIGHT SAFETY" title="Preflight checklist" text="This checklist supports disciplined preparation. It does not authorize flight or replace physical testing." /><div className="preflight-layout"><Panel title="Bench gates" eyebrow={`${complete}/${items.length} COMPLETE`}><div className="checklist">{items.map(([key, label]) => <button className={values[key] ? "check-row complete" : "check-row"} key={key} onClick={() => onToggle(key)}><span className="check-box">{values[key] ? "✓" : ""}</span><span>{label}</span><span className="check-state">{values[key] ? "DONE" : "OPEN"}</span></button>)}</div><button className="button primary wide" onClick={() => onAction(complete === items.length ? "Checklist complete — local authorization still required" : "Complete every bench gate first")}>Review readiness</button></Panel><Panel title="Control boundary" eyebrow="IMPORTANT"><div className="boundary-card"><div className="boundary-icon">◇</div><strong>Browser control is disabled</strong><p>Flight-critical behavior must be owned by the aircraft receiver, including radio-loss handling, output limits, watchdogs, and disarm behavior.</p></div></Panel></div></>;
+function Preflight({ checks, toggleCheck, onAction }: { checks: Record<string, boolean>; toggleCheck: (key: string) => void; onAction: (message: string) => void }) {
+  const items = [["battery", "Battery condition", "Inspect pack, connectors and mounting; verify chemistry and thresholds."], ["controls", "Control directions & travel", "Verify both ailerons, elevator and rudder without binding."], ["mixing", "Mixing configuration", "Confirm aircraft-applied configuration, including servo direction."], ["sensors", "Sensor orientation & calibration", "Keep the aircraft stationary and confirm the verified mounting."], ["radio", "Radio-link check", "Perform a physical range check with the propeller removed."], ["authorization", "Local flight authorization", "Confirm the receiver owns control and the browser remains read-only."]];
+  const complete = items.filter(([key]) => checks[key]).length;
+  return <><PageIntro eyebrow="FLIGHT SAFETY" title="Preflight checklist" text="A deliberate check before every departure. Operator completion is not proof of aircraft readiness." /><div className="alert-banner"><span className="warning-symbol">△</span><div><strong>Telemetry stale · current aircraft condition is unknown</strong><span>Automatically measured checks remain Unknown until a verified device source is connected.</span></div></div><section className="dashboard-columns"><Panel eyebrow={"OPERATOR-CONFIRMED CHECKS · " + complete + " / " + items.length} title="Bench gates"><div className="progress-track"><i style={{ width: (complete / items.length * 100) + "%" }} /></div>{items.map(([key, title, detail]) => <button className={checks[key] ? "check-item complete" : "check-item"} key={key} onClick={() => toggleCheck(key)}><span className="check-box">{checks[key] ? "✓" : ""}</span><div><strong>{title}</strong><span>{detail}</span></div><small>{checks[key] ? "DONE" : "OPEN"}</small></button>)}<button className="primary-button wide" onClick={() => onAction(complete === items.length ? "Checklist complete — local authorization still required" : "Complete all open gates first")}>Review readiness</button></Panel><Panel eyebrow="AUTOMATICALLY MEASURED CHECKS" title="System gates"><HealthRow label="Throttle-low condition" value="Unknown" detail="Requires verified input telemetry" tone="orange" /><HealthRow label="Radio-link check" value="Unknown" detail="Physical range check required" tone="orange" /><HealthRow label="IMU telemetry available" value="Unknown" detail="Presence does not prove accuracy" tone="orange" /><div className="operator-complete"><span>✓</span><div><strong>Operator checklist completed</strong><p>Automatic gates still require verified aircraft data.</p></div></div></Panel></section></>;
 }
 
-function Replay({ onAction }: { onAction: (text: string) => void }) {
-  return <><PageIntro eyebrow="RECORDED DATA" title="Sessions & replay" text="Replay is isolated from current hardware. It can inspect recorded samples but cannot create live alerts or control outputs." /><Panel title="Recording workspace" eyebrow="NO RECORDINGS YET"><div className="empty-state"><div className="empty-icon">↺</div><h3>Ready for a session</h3><p>Start a DEMO recording after telemetry contracts are connected. Recordings will retain their source and freshness metadata.</p><button className="button ghost" onClick={() => onAction("Recording start is available after a telemetry source is selected")}>Select source</button></div></Panel></>;
+function Replay({ onAction }: { onAction: (message: string) => void }) {
+  const sessions = [["Control-surface checkout", "2026-09-11 09:30 UTC", "600 samples"], ["Gentle bank test", "2026-09-11 10:30 UTC", "600 samples"], ["Radio-loss simulation", "2026-09-11 11:30 UTC", "600 samples"]];
+  return <><PageIntro eyebrow="RECORDED DATA" title="Flight logs & replay" text="Recordings preserve their source and freshness metadata. Replay cannot control hardware or generate current alerts." /><div className="replay-toolbar"><input placeholder="Search sessions or notes..." /><button className="select-button">All environments <span>⌄</span></button><span>3 sessions</span></div><Panel eyebrow="SESSION LIBRARY" title="Recent recordings"><div className="session-list">{sessions.map(([name, date, samples]) => <div className="session-row" key={name}><span className="session-icon">↺</span><div><strong>{name}</strong><span>{date} · DEMO · {samples}</span></div><button className="small-button" onClick={() => onAction("Session details opened")}>Details</button><button className="small-button" onClick={() => onAction("Replay opened in isolated mode")}>▶ Replay</button></div>)}</div></Panel><div className="note-card"><span>ⓘ</span><div><strong>Replay is isolated</strong><p>Background tabs can miss telemetry. Uninterrupted onboard recording requires additional firmware and storage.</p></div></div></>;
 }
 
-function Events() {
-  const events = [["10:42:08", "System initialized", "DEMO simulator started", "lime"], ["10:41:55", "Control path locked", "No browser actuator dispatcher", "orange"], ["10:41:51", "Aircraft selected", "FD-001 · bench profile", "blue"], ["10:41:49", "Session opened", "Local operator session", "gray"]];
-  return <><PageIntro eyebrow="AUDIT TRAIL" title="Event history" text="Events describe what the station knows. They are not proof that an actuator moved or that an aircraft is flight-ready." /><Panel title="Recent events" eyebrow="LOCAL SESSION"><div className="event-list">{events.map(([time, title, detail, tone]) => <div className="event-row" key={time + title}><span className={`event-dot ${tone}`} /><span className="event-time">{time}</span><div><strong>{title}</strong><span>{detail}</span></div></div>)}</div></Panel></>;
-}
-
-function Settings({ onAction }: { onAction: (text: string) => void }) {
-  return <><PageIntro eyebrow="WORKSPACE" title="Profiles & settings" text="Configure display preferences and future connection details without placing secrets in the browser bundle." /><div className="settings-grid"><Panel title="Workspace" eyebrow="LOCAL PROFILE"><Setting label="Aircraft identifier" value="FD-001" /><Setting label="Profile" value="Fixed-wing bench" /><Setting label="Theme" value="Charcoal / lime" /></Panel><Panel title="Cloud connection" eyebrow="OPTIONAL"><Setting label="Supabase URL" value={import.meta.env.VITE_SUPABASE_URL ? "Configured" : "Not configured"} /><Setting label="Authentication" value="Not configured" /><button className="button ghost" onClick={() => onAction("Add public Supabase URL and publishable key through deployment variables")}>Connection guide</button></Panel></div></>;
+function Settings({ onAction }: { onAction: (message: string) => void }) {
+  return <><PageIntro eyebrow="AIRCRAFT IDENTITY, ACCESS & INTEGRATION" title="Profiles & settings" text="Configure the station without placing device tokens or backend secrets in the browser bundle." /><div className="settings-tabs"><button className="selected">Aircraft profile</button><button>Integration</button><button>Access & storage</button><button>Wiring reference</button></div><section className="settings-grid"><Panel eyebrow="AIRCRAFT CONFIGURATION" title="Falcon 01"><Setting label="Aircraft name" value="Falcon 01" /><Setting label="Aircraft ID" value="FD-001" /><Setting label="Profile" value="Fixed-wing · custom nRF24 platform" /><Setting label="Telemetry target" value="10 Hz · standard dashboard" /><button className="primary-button wide" onClick={() => onAction("Configuration saved for this session")}>Save changes</button></Panel><Panel eyebrow="CLOUD CONNECTION" title="Supabase gateway"><Setting label="Public project URL" value={import.meta.env.VITE_SUPABASE_URL ? "Configured" : "Not configured"} /><Setting label="Device authentication" value="Server-side token required" /><Setting label="Live telemetry" value="Not connected" /><button className="outline-button wide" onClick={() => onAction("Integration guide opened")}>Connect NodeMCU →</button><div className="secret-note">The device token belongs in NodeMCU secrets and Supabase Edge Function secrets. It must never be placed in this browser bundle.</div></Panel></section></>;
 }
 
 function PageIntro({ eyebrow, title, text }: { eyebrow: string; title: string; text: string }) {
   return <div className="page-intro"><div className="eyebrow lime">{eyebrow}</div><h2>{title}</h2><p>{text}</p></div>;
 }
 
-function Panel({ title, eyebrow, action, onAction, children }: { title: string; eyebrow?: string; action?: string; onAction?: () => void; children: React.ReactNode }) {
-  return <section className="panel"><div className="panel-header"><div><div className="eyebrow">{eyebrow}</div><h3>{title}</h3></div>{action && <button className="small-link" onClick={onAction}>{action} →</button>}</div>{children}</section>;
+function Panel({ eyebrow, title, action, onAction, children, wide }: { eyebrow: string; title: string; action?: string; onAction?: () => void; children: ReactNode; wide?: boolean }) {
+  return <section className={wide ? "panel wide-panel" : "panel"}><div className="panel-head"><div><div className="eyebrow">{eyebrow}</div><h3>{title}</h3></div>{action && <button className="text-button" onClick={onAction}>{action}</button>}</div>{children}</section>;
 }
 
-function Metric({ label, value, sub, tone, icon }: { label: string; value: string; sub: string; tone: string; icon: string }) {
-  return <div className="metric-card"><div className={`metric-icon ${tone}`}>{icon}</div><div><div className="metric-label">{label}</div><div className="metric-value">{value}</div><div className="metric-sub">{sub}</div></div></div>;
+function Kpi({ icon, label, value, detail, accent, trend }: { icon: string; label: string; value: string; detail: string; accent: string; trend: string }) {
+  return <div className="kpi-card"><div className={"kpi-icon " + accent}>{icon}</div><div className="kpi-body"><span>{label}</span><strong>{value}</strong><small>{detail}</small></div><i className={"kpi-trend " + accent}>{trend}</i></div>;
 }
 
-function Snapshot({ title, value, detail, icon }: { title: string; value: string; detail: string; icon: string }) {
-  return <div className="snapshot-card"><span className="snapshot-icon">{icon}</span><div className="snapshot-title">{title}</div><strong>{value}</strong><span>{detail}</span></div>;
+function TelemetryChart({ values, color }: { values: number[]; color: string }) {
+  const points = values.map((value, index) => {
+    const x = (index / Math.max(values.length - 1, 1)) * 100;
+    const y = 82 - ((value - Math.min(...values)) / Math.max(Math.max(...values) - Math.min(...values), 1)) * 62;
+    return x.toFixed(2) + "," + y.toFixed(2);
+  }).join(" ");
+  return <div className="telemetry-chart"><div className="chart-grid-lines"><i /><i /><i /><i /></div><svg viewBox="0 0 100 90" preserveAspectRatio="none"><defs><linearGradient id={"fill-" + color} x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor={color === "lime" ? "#c6f36b" : color === "orange" ? "#ff9b68" : "#7cb8ff"} stopOpacity=".28" /><stop offset="100%" stopColor={color === "lime" ? "#c6f36b" : color === "orange" ? "#ff9b68" : "#7cb8ff"} stopOpacity="0" /></linearGradient></defs><polygon points={"0,90 " + points + " 100,90"} fill={"url(#fill-" + color + ")"} /><polyline points={points} fill="none" stroke={color === "lime" ? "#c6f36b" : color === "orange" ? "#ff9b68" : "#7cb8ff"} strokeWidth="1.8" vectorEffect="non-scaling-stroke" /></svg></div>;
 }
 
-function HealthItem({ label, value, tone }: { label: string; value: string; tone: string }) {
-  return <div className="health-item"><span className={`status-dot ${tone}`} /><span>{label}</span><strong>{value}</strong></div>;
+function Joystick({ label, x, y, active }: { label: string; x: string; y: string; active?: boolean }) {
+  return <div className="joystick"><span>{label}</span><div className={active ? "stick-pad active" : "stick-pad"}><i style={{ left: "50%", top: "50%", transform: "translate(calc(" + x + " * 100%), calc(" + y + " * -100%))" }} /></div><small>X {x} · Y {y}</small></div>;
 }
 
-function Sparkline({ values }: { values: number[] }) {
-  const points = values.map((value, index) => `${(index / Math.max(values.length - 1, 1)) * 100},${70 - ((value - 35) / 70) * 58}`).join(" ");
-  return <svg className="sparkline" viewBox="0 0 100 70" preserveAspectRatio="none"><defs><linearGradient id="chart-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#c6f36b" stopOpacity=".32" /><stop offset="100%" stopColor="#c6f36b" stopOpacity="0" /></linearGradient></defs><polygon points={`0,70 ${points} 100,70`} fill="url(#chart-fill)" /><polyline points={points} fill="none" stroke="#c6f36b" strokeWidth="1.7" /></svg>;
+function RangeRow({ label, value, setValue, suffix }: { label: string; value: number; setValue: (value: number) => void; suffix: string }) {
+  return <div className="range-row"><div><span>{label}</span><b>{value}{suffix}</b></div><input type="range" min="0" max="100" value={value} onChange={(event) => setValue(Number(event.target.value))} /></div>;
 }
 
-function ValueBlock({ label, value }: { label: string; value: string }) {
-  return <div><span>{label}</span><strong>{value}</strong></div>;
+function HealthRow({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: string }) {
+  return <div className="health-row"><span className={"status-led " + tone} /><div><strong>{label}</strong><small>{detail}</small></div><b className={tone + "-text"}>{value}</b></div>;
+}
+
+function EventRow({ time, title, detail, tone }: { time: string; title: string; detail: string; tone: string }) {
+  return <div className="event-row"><span className={"event-dot " + tone} /><time>{time}</time><div><strong>{title}</strong><span>{detail}</span></div></div>;
+}
+
+function Readout({ label, value }: { label: string; value: string }) {
+  return <div className="readout"><span>{label}</span><strong>{value}</strong></div>;
 }
 
 function Instrument({ label, value, state }: { label: string; value: string; state: string }) {
   return <div className="instrument-row"><span>{label}</span><strong>{value}</strong><small>{state}</small></div>;
 }
 
-function LinkLayer({ name, value, state }: { name: string; value: string; state: string }) {
-  return <div className="link-layer"><span className="status-dot green" /><div><strong>{name}</strong><span>{value}</span></div><small>{state}</small></div>;
+function ChannelRow({ number, name, input, command, warning }: { number: string; name: string; input: string; command: string; warning?: boolean }) {
+  return <div className="channel-row"><b>{number}</b><strong>{name}</strong><span>{input}</span><span className={warning ? "orange-text" : ""}>{command}</span><small className={warning ? "tag orange-tag" : "tag green-tag"}>{warning ? "LOCKED" : "NOMINAL"}</small></div>;
+}
+
+function SensorRow({ name, state, detail }: { name: string; state: string; detail: string }) {
+  return <div className="sensor-row"><span className={state === "Streaming" ? "status-led green" : "status-led orange"} /><strong>{name}</strong><span>{detail}</span><small>{state}</small></div>;
 }
 
 function Setting({ label, value }: { label: string; value: string }) {
@@ -405,3 +415,4 @@ function Setting({ label, value }: { label: string; value: string }) {
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
+
