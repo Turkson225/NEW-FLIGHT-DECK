@@ -283,6 +283,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--lime); outl
   .auth-card { max-width: 520px; margin: 0 auto; padding: 32px 25px 28px; }
 }
 
+.signout-button { border: 0; border-left: 1px solid var(--line); padding: 0 10px 0 14px; color: var(--soft); background: transparent; font-size: 11px; cursor: pointer; } .signout-button:hover { color: var(--orange); }
 .signin-trigger { border: 0; cursor: pointer; }
 .auth-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 20px; background: rgba(3,7,10,.76); backdrop-filter: blur(8px); }
 .auth-modal { position: relative; width: min(420px, 100%); border: 1px solid rgba(198,243,107,.25); border-radius: 12px; padding: 28px; color: var(--soft); background: linear-gradient(145deg, #17232b, #0d141a); box-shadow: 0 28px 80px rgba(0,0,0,.55); }
