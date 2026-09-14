@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
-import { cloudRequest, sendMagicLink, supabase, supabaseConfigured } from "./lib/supabase";
+import { cloudRequest, sendMagicLink, supabase, supabaseConfigured, verifyEmailCode } from "./lib/supabase";
 
 type Page = "overview" | "monitor" | "mixer" | "sensors" | "power" | "preflight" | "replay" | "settings";
 type Mode = "DEMO" | "LIVE" | "REPLAY";
@@ -452,16 +452,18 @@ function Settings({ onAction }: { onAction: (message: string) => void }) {
       return;
     }
     const error = await sendMagicLink(email.trim());
-    setAuthMessage(error ?? "Check your email for the sign-in link.");
+    setAuthMessage(error ?? "A 6-digit verification code was sent to your email.");
     onAction(error ?? "Magic-link sign-in requested");
   };
 
-  return <><PageIntro eyebrow="AIRCRAFT IDENTITY, ACCESS & INTEGRATION" title="Profiles & settings" text="Configure the station without placing device tokens or backend secrets in the browser bundle." /><div className="settings-tabs"><button className="selected" onClick={() => onAction("Aircraft profile settings selected")}>Aircraft profile</button><button onClick={() => onAction("Integration settings selected")}>Integration</button><button onClick={() => onAction("Access and storage settings selected")}>Access & storage</button><button onClick={() => onAction("Wiring reference selected")}>Wiring reference</button></div><section className="settings-grid"><Panel eyebrow="AIRCRAFT CONFIGURATION" title="Falcon 01"><Setting label="Aircraft name" value="Falcon 01" /><Setting label="Aircraft ID" value="FD-001" /><Setting label="Profile" value="Fixed-wing · custom nRF24 platform" /><Setting label="Telemetry target" value="10 Hz · standard dashboard" /><button className="primary-button wide" onClick={() => onAction("Configuration saved for this session")}>Save changes</button></Panel><Panel eyebrow="CLOUD CONNECTION" title="New Supabase gateway"><Setting label="Public project URL" value={supabaseConfigured ? "Configured" : "Not configured"} /><Setting label="Browser session" value={accountEmail ?? "Signed out"} /><Setting label="Live telemetry" value={accountEmail ? "Ready to poll" : "Sign-in required"} />{!accountEmail && <div className="auth-form"><input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" type="email" /><button className="outline-button wide" onClick={connectAccount}>Email sign-in link →</button><small>{authMessage}</small></div>}<button className="outline-button wide" onClick={() => onAction("NodeMCU ingest remains server-authenticated")}>Connect NodeMCU →</button><div className="secret-note">The device token belongs in NodeMCU secrets and the new Supabase Edge Function secrets. It must never be placed in this browser bundle.</div></Panel></section></>;
+  return <><PageIntro eyebrow="AIRCRAFT IDENTITY, ACCESS & INTEGRATION" title="Profiles & settings" text="Configure the station without placing device tokens or backend secrets in the browser bundle." /><div className="settings-tabs"><button className="selected" onClick={() => onAction("Aircraft profile settings selected")}>Aircraft profile</button><button onClick={() => onAction("Integration settings selected")}>Integration</button><button onClick={() => onAction("Access and storage settings selected")}>Access & storage</button><button onClick={() => onAction("Wiring reference selected")}>Wiring reference</button></div><section className="settings-grid"><Panel eyebrow="AIRCRAFT CONFIGURATION" title="Falcon 01"><Setting label="Aircraft name" value="Falcon 01" /><Setting label="Aircraft ID" value="FD-001" /><Setting label="Profile" value="Fixed-wing · custom nRF24 platform" /><Setting label="Telemetry target" value="10 Hz · standard dashboard" /><button className="primary-button wide" onClick={() => onAction("Configuration saved for this session")}>Save changes</button></Panel><Panel eyebrow="CLOUD CONNECTION" title="New Supabase gateway"><Setting label="Public project URL" value={supabaseConfigured ? "Configured" : "Not configured"} /><Setting label="Browser session" value={accountEmail ?? "Signed out"} /><Setting label="Live telemetry" value={accountEmail ? "Ready to poll" : "Sign-in required"} />{!accountEmail && <div className="auth-form"><input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" type="email" /><button className="outline-button wide" onClick={connectAccount}>Send 6-digit code →</button><small>{authMessage}</small></div>}<button className="outline-button wide" onClick={() => onAction("NodeMCU ingest remains server-authenticated")}>Connect NodeMCU →</button><div className="secret-note">The device token belongs in NodeMCU secrets and the new Supabase Edge Function secrets. It must never be placed in this browser bundle.</div></Panel></section></>;
 }
 
 function SignInModal({ accountEmail, onClose, onSignedIn, onSignedOut }: { accountEmail: string | null; onClose: () => void; onSignedIn: (email: string) => void; onSignedOut: () => void }) {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
+  const [code, setCode] = useState("");
+  const [codeSent, setCodeSent] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const requestLink = async () => {
@@ -472,7 +474,8 @@ function SignInModal({ accountEmail, onClose, onSignedIn, onSignedOut }: { accou
     setBusy(true);
     const error = await sendMagicLink(email.trim());
     setBusy(false);
-    setMessage(error ?? "Magic link sent. Check your email to continue.");
+    setMessage(error ?? "A 6-digit verification code was sent to your email.");
+    if (!error) setCodeSent(true);
   };
 
   const signOut = async () => {
@@ -486,7 +489,7 @@ function SignInModal({ accountEmail, onClose, onSignedIn, onSignedOut }: { accou
       <button className="auth-close" onClick={onClose} aria-label="Close sign in">×</button>
       <div className="eyebrow lime">FLIGHT DECK ACCESS</div>
       <h2 id="sign-in-title">{accountEmail ? "Operator session" : "Sign in to Flight Deck"}</h2>
-      {accountEmail ? <><p className="auth-copy">Authenticated operator session</p><div className="auth-account"><span className="online-dot" />{accountEmail}</div><button className="primary-button wide" onClick={signOut}>Sign out</button></> : <><p className="auth-copy">Use your Supabase email link to access protected aircraft telemetry.</p><input className="auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" autoComplete="email" /><button className="primary-button wide" onClick={requestLink} disabled={busy}>{busy ? "Sending..." : "Send sign-in link →"}</button>{message && <div className="auth-message">{message}</div>}<small className="auth-safety">The browser is read-only. Authentication does not enable actuator control.</small></>}
+      {accountEmail ? <><p className="auth-copy">Authenticated operator session</p><div className="auth-account"><span className="online-dot" />{accountEmail}</div><button className="primary-button wide" onClick={signOut}>Sign out</button></> : <><p className="auth-copy">Enter your email to receive a 6-digit Supabase verification code.</p><input className="auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" autoComplete="email" /><button className="primary-button wide" onClick={requestLink} disabled={busy}>{busy ? "Sending..." : codeSent ? "Resend code" : "Send 6-digit code →"}</button>{codeSent && <><input className="auth-input code-input" type="text" inputMode="numeric" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\\D/g, "").slice(0, 6))} placeholder="123456" autoComplete="one-time-code" /><button className="outline-button wide" onClick={async () => { if (code.length !== 6) { setMessage("Enter the full 6-digit code."); return; } setBusy(true); const result = await verifyEmailCode(email.trim(), code); setBusy(false); setMessage(result.error ?? "Verified successfully."); if (!result.error) onSignedIn(result.email); }} disabled={busy}>{busy ? "Verifying..." : "Verify code →"}</button></>}{message && <div className="auth-message">{message}</div>}<small className="auth-safety">The browser is read-only. Authentication does not enable actuator control.</small></>}
     </section>
   </div>;
 }
