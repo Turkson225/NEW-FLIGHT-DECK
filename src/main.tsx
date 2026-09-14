@@ -88,6 +88,8 @@ const initialTelemetry: Telemetry = {
 
 function App() {
   const [page, setPage] = useState<Page>("overview");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("DEMO");
   const [telemetry, setTelemetry] = useState(initialTelemetry);
   const [signal, setSignal] = useState<number[]>([82, 86, 84, 89, 87, 91, 88, 92, 90, 94, 91, 93, 96, 94, 95, 93, 96, 95]);
@@ -190,7 +192,7 @@ function App() {
   };
 
   return (
-    <div className="app-shell">
+    <div className={"app-shell" + (sidebarCollapsed ? " sidebar-collapsed" : "") + (mobileNavOpen ? " mobile-nav-open" : "")}>
       <aside className="sidebar">
         <div className="brand-row">
           <div className="brand-mark">FD</div>
@@ -198,7 +200,7 @@ function App() {
             <div className="brand-name">FLIGHT DECK</div>
             <div className="brand-caption">AEROSPACE OPERATIONS</div>
           </div>
-          <button className="collapse-button" aria-label="Collapse navigation">‹</button>
+          <button className="collapse-button" aria-label="Collapse navigation" aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? "›" : "‹"}</button>
         </div>
 
         <div className="aircraft-card-mini">
@@ -219,7 +221,7 @@ function App() {
                 <button
                   key={item.id}
                   className={page === item.id ? "nav-link active" : "nav-link"}
-                  onClick={() => setPage(item.id)}
+                  onClick={() => { setPage(item.id); setMobileNavOpen(false); }}
                 >
                   <span className="nav-link-icon">{item.icon}</span>
                   <span>{item.label}</span>
@@ -250,7 +252,7 @@ function App() {
       <main className="main-content">
         <header className="topbar">
           <div className="topbar-left">
-            <button className="mobile-menu" aria-label="Open menu">☰</button>
+            <button className="mobile-menu" aria-label="Open menu" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(!mobileNavOpen)}>☰</button>
             <div className="breadcrumb">FLIGHT OPERATIONS <span>/</span> {pageTitles[page]}</div>
             <h1>{pageTitles[page]}</h1>
           </div>
@@ -418,7 +420,7 @@ function Preflight({ checks, toggleCheck, onAction }: { checks: Record<string, b
 
 function Replay({ onAction }: { onAction: (message: string) => void }) {
   const sessions = [["Control-surface checkout", "2026-09-11 09:30 UTC", "600 samples"], ["Gentle bank test", "2026-09-11 10:30 UTC", "600 samples"], ["Radio-loss simulation", "2026-09-11 11:30 UTC", "600 samples"]];
-  return <><PageIntro eyebrow="RECORDED DATA" title="Flight logs & replay" text="Recordings preserve their source and freshness metadata. Replay cannot control hardware or generate current alerts." /><div className="replay-toolbar"><input placeholder="Search sessions or notes..." /><button className="select-button">All environments <span>⌄</span></button><span>3 sessions</span></div><Panel eyebrow="SESSION LIBRARY" title="Recent recordings"><div className="session-list">{sessions.map(([name, date, samples]) => <div className="session-row" key={name}><span className="session-icon">↺</span><div><strong>{name}</strong><span>{date} · DEMO · {samples}</span></div><button className="small-button" onClick={() => onAction("Session details opened")}>Details</button><button className="small-button" onClick={() => onAction("Replay opened in isolated mode")}>▶ Replay</button></div>)}</div></Panel><div className="note-card"><span>ⓘ</span><div><strong>Replay is isolated</strong><p>Background tabs can miss telemetry. Uninterrupted onboard recording requires additional firmware and storage.</p></div></div></>;
+  return <><PageIntro eyebrow="RECORDED DATA" title="Flight logs & replay" text="Recordings preserve their source and freshness metadata. Replay cannot control hardware or generate current alerts." /><div className="replay-toolbar"><input placeholder="Search sessions or notes..." /><button className="select-button" onClick={() => onAction("Environment filter opened — DEMO sessions shown")}>All environments <span>⌄</span></button><span>3 sessions</span></div><Panel eyebrow="SESSION LIBRARY" title="Recent recordings"><div className="session-list">{sessions.map(([name, date, samples]) => <div className="session-row" key={name}><span className="session-icon">↺</span><div><strong>{name}</strong><span>{date} · DEMO · {samples}</span></div><button className="small-button" onClick={() => onAction("Session details opened")}>Details</button><button className="small-button" onClick={() => onAction("Replay opened in isolated mode")}>▶ Replay</button></div>)}</div></Panel><div className="note-card"><span>ⓘ</span><div><strong>Replay is isolated</strong><p>Background tabs can miss telemetry. Uninterrupted onboard recording requires additional firmware and storage.</p></div></div></>;
 }
 
 function Settings({ onAction }: { onAction: (message: string) => void }) {
@@ -451,7 +453,7 @@ function Settings({ onAction }: { onAction: (message: string) => void }) {
     onAction(error ?? "Magic-link sign-in requested");
   };
 
-  return <><PageIntro eyebrow="AIRCRAFT IDENTITY, ACCESS & INTEGRATION" title="Profiles & settings" text="Configure the station without placing device tokens or backend secrets in the browser bundle." /><div className="settings-tabs"><button className="selected">Aircraft profile</button><button>Integration</button><button>Access & storage</button><button>Wiring reference</button></div><section className="settings-grid"><Panel eyebrow="AIRCRAFT CONFIGURATION" title="Falcon 01"><Setting label="Aircraft name" value="Falcon 01" /><Setting label="Aircraft ID" value="FD-001" /><Setting label="Profile" value="Fixed-wing · custom nRF24 platform" /><Setting label="Telemetry target" value="10 Hz · standard dashboard" /><button className="primary-button wide" onClick={() => onAction("Configuration saved for this session")}>Save changes</button></Panel><Panel eyebrow="CLOUD CONNECTION" title="New Supabase gateway"><Setting label="Public project URL" value={supabaseConfigured ? "Configured" : "Not configured"} /><Setting label="Browser session" value={accountEmail ?? "Signed out"} /><Setting label="Live telemetry" value={accountEmail ? "Ready to poll" : "Sign-in required"} />{!accountEmail && <div className="auth-form"><input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" type="email" /><button className="outline-button wide" onClick={connectAccount}>Email sign-in link →</button><small>{authMessage}</small></div>}<button className="outline-button wide" onClick={() => onAction("NodeMCU ingest remains server-authenticated")}>Connect NodeMCU →</button><div className="secret-note">The device token belongs in NodeMCU secrets and the new Supabase Edge Function secrets. It must never be placed in this browser bundle.</div></Panel></section></>;
+  return <><PageIntro eyebrow="AIRCRAFT IDENTITY, ACCESS & INTEGRATION" title="Profiles & settings" text="Configure the station without placing device tokens or backend secrets in the browser bundle." /><div className="settings-tabs"><button className="selected" onClick={() => onAction("Aircraft profile settings selected")}>Aircraft profile</button><button onClick={() => onAction("Integration settings selected")}>Integration</button><button onClick={() => onAction("Access and storage settings selected")}>Access & storage</button><button onClick={() => onAction("Wiring reference selected")}>Wiring reference</button></div><section className="settings-grid"><Panel eyebrow="AIRCRAFT CONFIGURATION" title="Falcon 01"><Setting label="Aircraft name" value="Falcon 01" /><Setting label="Aircraft ID" value="FD-001" /><Setting label="Profile" value="Fixed-wing · custom nRF24 platform" /><Setting label="Telemetry target" value="10 Hz · standard dashboard" /><button className="primary-button wide" onClick={() => onAction("Configuration saved for this session")}>Save changes</button></Panel><Panel eyebrow="CLOUD CONNECTION" title="New Supabase gateway"><Setting label="Public project URL" value={supabaseConfigured ? "Configured" : "Not configured"} /><Setting label="Browser session" value={accountEmail ?? "Signed out"} /><Setting label="Live telemetry" value={accountEmail ? "Ready to poll" : "Sign-in required"} />{!accountEmail && <div className="auth-form"><input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" type="email" /><button className="outline-button wide" onClick={connectAccount}>Email sign-in link →</button><small>{authMessage}</small></div>}<button className="outline-button wide" onClick={() => onAction("NodeMCU ingest remains server-authenticated")}>Connect NodeMCU →</button><div className="secret-note">The device token belongs in NodeMCU secrets and the new Supabase Edge Function secrets. It must never be placed in this browser bundle.</div></Panel></section></>;
 }
 
 function PageIntro({ eyebrow, title, text }: { eyebrow: string; title: string; text: string }) {
