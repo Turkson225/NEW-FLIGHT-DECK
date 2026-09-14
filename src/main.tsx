@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
+import { cloudRequest, sendMagicLink, supabase, supabaseConfigured } from "./lib/supabase";
 
 type Page = "overview" | "monitor" | "mixer" | "sensors" | "power" | "preflight" | "replay" | "settings";
 type Mode = "DEMO" | "LIVE" | "REPLAY";
@@ -40,6 +41,39 @@ const pageTitles: Record<Page, string> = {
   settings: "Profiles & settings",
 };
 
+type LiveStatus = "demo" | "replay" | "not-configured" | "signed-out" | "awaiting-device" | "connected" | "stale" | "error";
+
+function mapCloudFrame(frame: any): Telemetry {
+  const radio = frame?.radio;
+  const link = radio?.expected > 0 ? (radio.received / radio.expected) * 100 : frame?.links?.radio === true ? 100 : 0;
+  const value = (candidate: unknown, fallback = 0) =>
+    typeof candidate === "number" && Number.isFinite(candidate) ? candidate : fallback;
+  return {
+    timestamp: frame?.receivedAt ? new Date(frame.receivedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—",
+    link: Math.max(0, Math.min(100, link)),
+    battery: 0,
+    voltage: value(frame?.aircraftVoltage),
+    pitch: value(frame?.attitude?.pitch),
+    roll: value(frame?.attitude?.roll),
+    temperature: value(frame?.chipTemp),
+    acceleration: [value(frame?.accel?.x) / 9.80665, value(frame?.accel?.y) / 9.80665, value(frame?.accel?.z) / 9.80665],
+    angular: [value(frame?.gyro?.x), value(frame?.gyro?.y), value(frame?.gyro?.z)],
+  };
+}
+
+function liveStatusLabel(status: LiveStatus): string {
+  return {
+    demo: "Simulator linked",
+    replay: "Replay isolated",
+    "not-configured": "Supabase not configured",
+    "signed-out": "Sign-in required",
+    "awaiting-device": "Waiting for aircraft",
+    connected: "Cloud telemetry linked",
+    stale: "Telemetry stale",
+    error: "Cloud connection error",
+  }[status];
+}
+
 const initialTelemetry: Telemetry = {
   timestamp: "—",
   link: 0,
@@ -65,6 +99,7 @@ function App() {
   const [recording, setRecording] = useState(false);
   const [voice, setVoice] = useState(false);
   const [toast, setToast] = useState("DEMO simulator active");
+  const [liveStatus, setLiveStatus] = useState<LiveStatus>("demo");
   const [checks, setChecks] = useState<Record<string, boolean>>({
     battery: true,
     controls: true,
@@ -75,34 +110,67 @@ function App() {
   });
 
   useEffect(() => {
-    if (mode !== "DEMO") {
+    if (mode !== "LIVE") {
+      setLiveStatus(mode === "DEMO" ? "demo" : "replay");
       setTelemetry(initialTelemetry);
-      setToast(mode === "LIVE" ? "LIVE is read-only — awaiting verified telemetry" : "REPLAY is isolated from hardware");
+      setToast(mode === "DEMO" ? "DEMO simulator active" : "REPLAY is isolated from hardware");
       return;
     }
 
-    const update = () => {
-      const seconds = Date.now() / 1000;
-      const now = new Date();
-      const next: Telemetry = {
-        timestamp: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-        link: 92 + Math.sin(seconds / 4) * 4,
-        battery: 92 - (seconds % 600) / 65,
-        voltage: 16.42 - (seconds % 600) / 6000,
-        pitch: Math.sin(seconds / 4) * 2.9,
-        roll: Math.cos(seconds / 5) * 5.7,
-        temperature: 28.4 + Math.sin(seconds / 8) * 1.2,
-        acceleration: [Math.sin(seconds / 3) * 0.16, Math.cos(seconds / 4) * 0.18, -0.98 + Math.sin(seconds / 6) * 0.03],
-        angular: [Math.sin(seconds / 2) * 1.2, Math.cos(seconds / 3) * 0.8, Math.sin(seconds / 5) * 0.35],
-      };
-      setTelemetry(next);
-      setSignal((items) => [...items.slice(-23), Math.round(next.link)]);
-      setToast(recording ? "Recording telemetry · 10 Hz target" : "DEMO simulator active");
+    let active = true;
+    const poll = async () => {
+      if (!supabaseConfigured || !supabase) {
+        setLiveStatus("not-configured");
+        setTelemetry(initialTelemetry);
+        setToast("LIVE needs the new Supabase project variables");
+        return;
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!active) return;
+      if (!session) {
+        setLiveStatus("signed-out");
+        setTelemetry(initialTelemetry);
+        setToast("Sign in before reading protected aircraft telemetry");
+        return;
+      }
+
+      try {
+        const response = await cloudRequest("/api/telemetry?aircraftId=FD-001");
+        const payload = await response.json() as { frame?: any; error?: string };
+        if (!active) return;
+        if (!response.ok) {
+          setLiveStatus("error");
+          setToast(payload.error ?? "Cloud telemetry request failed");
+          return;
+        }
+        if (!payload.frame) {
+          setLiveStatus("awaiting-device");
+          setTelemetry(initialTelemetry);
+          setToast("Supabase connected · waiting for NodeMCU telemetry");
+          return;
+        }
+
+        const next = mapCloudFrame(payload.frame);
+        const age = Date.now() - Number(payload.frame.receivedAt ?? 0);
+        setTelemetry(next);
+        setSignal((items) => [...items.slice(-23), Math.round(next.link)]);
+        setLiveStatus(age > 3000 ? "stale" : "connected");
+        setToast(age > 3000 ? "Telemetry is stale · aircraft condition is unknown" : "Live telemetry synchronized");
+      } catch {
+        if (active) {
+          setLiveStatus("error");
+          setToast("Cloud telemetry unavailable");
+        }
+      }
     };
 
-    update();
-    const timer = window.setInterval(update, 1000);
-    return () => window.clearInterval(timer);
+    poll();
+    const timer = window.setInterval(poll, 2500);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, [mode, recording]);
 
   const groupedNav = useMemo(() => {
@@ -187,7 +255,7 @@ function App() {
             <h1>{pageTitles[page]}</h1>
           </div>
           <div className="topbar-right">
-            <div className="verified-pill"><span className="online-dot" /> Verified account</div>
+            <div className="verified-pill"><span className={liveStatus === "connected" ? "online-dot" : "status-led orange"} /> {liveStatusLabel(liveStatus)}</div>
             <div className="mode-control">
               {(["DEMO", "LIVE", "REPLAY"] as Mode[]).map((item) => (
                 <button key={item} className={mode === item ? "mode-tab selected" : "mode-tab"} onClick={() => setMode(item)}>{item}</button>
@@ -203,7 +271,7 @@ function App() {
 
         <div className="content">
           <div className="context-bar">
-            <div className="context-status"><span className="status-led green" /><strong>{mode === "DEMO" ? "Simulator linked" : mode === "LIVE" ? "Aircraft stale" : "Replay isolated"}</strong><span>Falcon 01 · FD-001</span></div>
+            <div className="context-status"><span className={liveStatus === "connected" ? "status-led green" : "status-led orange"} /><strong>{liveStatusLabel(liveStatus)}</strong><span>Falcon 01 · FD-001</span></div>
             <div className="context-actions">
               <button className="outline-button" onClick={() => notify("Control path is locked in the browser")}>◇ Parachute</button>
               <button className="outline-button" onClick={() => setVoice(!voice)}>{voice ? "◉ Voice on" : "◌ Voice off"}</button>
@@ -354,7 +422,36 @@ function Replay({ onAction }: { onAction: (message: string) => void }) {
 }
 
 function Settings({ onAction }: { onAction: (message: string) => void }) {
-  return <><PageIntro eyebrow="AIRCRAFT IDENTITY, ACCESS & INTEGRATION" title="Profiles & settings" text="Configure the station without placing device tokens or backend secrets in the browser bundle." /><div className="settings-tabs"><button className="selected">Aircraft profile</button><button>Integration</button><button>Access & storage</button><button>Wiring reference</button></div><section className="settings-grid"><Panel eyebrow="AIRCRAFT CONFIGURATION" title="Falcon 01"><Setting label="Aircraft name" value="Falcon 01" /><Setting label="Aircraft ID" value="FD-001" /><Setting label="Profile" value="Fixed-wing · custom nRF24 platform" /><Setting label="Telemetry target" value="10 Hz · standard dashboard" /><button className="primary-button wide" onClick={() => onAction("Configuration saved for this session")}>Save changes</button></Panel><Panel eyebrow="CLOUD CONNECTION" title="Supabase gateway"><Setting label="Public project URL" value={import.meta.env.VITE_SUPABASE_URL ? "Configured" : "Not configured"} /><Setting label="Device authentication" value="Server-side token required" /><Setting label="Live telemetry" value="Not connected" /><button className="outline-button wide" onClick={() => onAction("Integration guide opened")}>Connect NodeMCU →</button><div className="secret-note">The device token belongs in NodeMCU secrets and Supabase Edge Function secrets. It must never be placed in this browser bundle.</div></Panel></section></>;
+  const [email, setEmail] = useState("");
+  const [accountEmail, setAccountEmail] = useState<string | null>(null);
+  const [authMessage, setAuthMessage] = useState("");
+
+  useEffect(() => {
+    if (!supabase) return;
+    let active = true;
+    supabase.auth.getUser().then(({ data }) => {
+      if (active) setAccountEmail(data.user?.email ?? null);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAccountEmail(session?.user?.email ?? null);
+    });
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const connectAccount = async () => {
+    if (!email.trim()) {
+      setAuthMessage("Enter an email address first.");
+      return;
+    }
+    const error = await sendMagicLink(email.trim());
+    setAuthMessage(error ?? "Check your email for the sign-in link.");
+    onAction(error ?? "Magic-link sign-in requested");
+  };
+
+  return <><PageIntro eyebrow="AIRCRAFT IDENTITY, ACCESS & INTEGRATION" title="Profiles & settings" text="Configure the station without placing device tokens or backend secrets in the browser bundle." /><div className="settings-tabs"><button className="selected">Aircraft profile</button><button>Integration</button><button>Access & storage</button><button>Wiring reference</button></div><section className="settings-grid"><Panel eyebrow="AIRCRAFT CONFIGURATION" title="Falcon 01"><Setting label="Aircraft name" value="Falcon 01" /><Setting label="Aircraft ID" value="FD-001" /><Setting label="Profile" value="Fixed-wing · custom nRF24 platform" /><Setting label="Telemetry target" value="10 Hz · standard dashboard" /><button className="primary-button wide" onClick={() => onAction("Configuration saved for this session")}>Save changes</button></Panel><Panel eyebrow="CLOUD CONNECTION" title="New Supabase gateway"><Setting label="Public project URL" value={supabaseConfigured ? "Configured" : "Not configured"} /><Setting label="Browser session" value={accountEmail ?? "Signed out"} /><Setting label="Live telemetry" value={accountEmail ? "Ready to poll" : "Sign-in required"} />{!accountEmail && <div className="auth-form"><input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" type="email" /><button className="outline-button wide" onClick={connectAccount}>Email sign-in link →</button><small>{authMessage}</small></div>}<button className="outline-button wide" onClick={() => onAction("NodeMCU ingest remains server-authenticated")}>Connect NodeMCU →</button><div className="secret-note">The device token belongs in NodeMCU secrets and the new Supabase Edge Function secrets. It must never be placed in this browser bundle.</div></Panel></section></>;
 }
 
 function PageIntro({ eyebrow, title, text }: { eyebrow: string; title: string; text: string }) {
