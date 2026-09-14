@@ -92,6 +92,8 @@ function App() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [accountEmail, setAccountEmail] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(!supabaseConfigured);
+  const [demoAccess, setDemoAccess] = useState(false);
   const [mode, setMode] = useState<Mode>("DEMO");
   const [telemetry, setTelemetry] = useState(initialTelemetry);
   const [signal, setSignal] = useState<number[]>([82, 86, 84, 89, 87, 91, 88, 92, 90, 94, 91, 93, 96, 94, 95, 93, 96, 95]);
@@ -112,6 +114,30 @@ function App() {
     radio: true,
     authorization: true,
   });
+
+  useEffect(() => {
+    if (!supabase) {
+      setAuthReady(true);
+      return;
+    }
+    let active = true;
+    supabase.auth.getUser().then(({ data }) => {
+      if (active) {
+        setAccountEmail(data.user?.email ?? null);
+        setAuthReady(true);
+      }
+    }).catch(() => {
+      if (active) setAuthReady(true);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAccountEmail(session?.user?.email ?? null);
+      setAuthReady(true);
+    });
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     if (mode !== "LIVE") {
@@ -193,6 +219,14 @@ function App() {
     setChecks((current) => ({ ...current, [key]: !current[key] }));
   };
 
+  if (!authReady) return <AuthLoading />;
+  if (!accountEmail && !demoAccess) {
+    return <AuthScreen
+      onDemo={() => { setDemoAccess(true); setToast("DEMO simulator active"); }}
+      onSignedIn={(email) => { setAccountEmail(email); setDemoAccess(false); setToast("Signed in successfully"); }}
+    />;
+  }
+
   return (
     <div className={"app-shell" + (sidebarCollapsed ? " sidebar-collapsed" : "") + (mobileNavOpen ? " mobile-nav-open" : "")}>
       <aside className="sidebar">
@@ -273,7 +307,7 @@ function App() {
           </div>
         </header>
 
-        {authOpen && <SignInModal accountEmail={accountEmail} onClose={() => setAuthOpen(false)} onSignedIn={(email) => { setAccountEmail(email); setAuthOpen(false); notify("Signed in successfully"); }} onSignedOut={() => { setAccountEmail(null); notify("Signed out"); }} />}
+        {authOpen && <SignInModal accountEmail={accountEmail} onClose={() => setAuthOpen(false)} onSignedIn={(email) => { setAccountEmail(email); setDemoAccess(false); setAuthOpen(false); notify("Signed in successfully"); }} onSignedOut={() => { setAccountEmail(null); notify("Signed out"); }} />}
           <div className="content">
           <div className="context-bar">
             <div className="context-status"><span className={liveStatus === "connected" ? "status-led green" : "status-led orange"} /><strong>{liveStatusLabel(liveStatus)}</strong><span>Falcon 01 · FD-001</span></div>
@@ -457,6 +491,73 @@ function Settings({ onAction }: { onAction: (message: string) => void }) {
   };
 
   return <><PageIntro eyebrow="AIRCRAFT IDENTITY, ACCESS & INTEGRATION" title="Profiles & settings" text="Configure the station without placing device tokens or backend secrets in the browser bundle." /><div className="settings-tabs"><button className="selected" onClick={() => onAction("Aircraft profile settings selected")}>Aircraft profile</button><button onClick={() => onAction("Integration settings selected")}>Integration</button><button onClick={() => onAction("Access and storage settings selected")}>Access & storage</button><button onClick={() => onAction("Wiring reference selected")}>Wiring reference</button></div><section className="settings-grid"><Panel eyebrow="AIRCRAFT CONFIGURATION" title="Falcon 01"><Setting label="Aircraft name" value="Falcon 01" /><Setting label="Aircraft ID" value="FD-001" /><Setting label="Profile" value="Fixed-wing · custom nRF24 platform" /><Setting label="Telemetry target" value="10 Hz · standard dashboard" /><button className="primary-button wide" onClick={() => onAction("Configuration saved for this session")}>Save changes</button></Panel><Panel eyebrow="CLOUD CONNECTION" title="New Supabase gateway"><Setting label="Public project URL" value={supabaseConfigured ? "Configured" : "Not configured"} /><Setting label="Browser session" value={accountEmail ?? "Signed out"} /><Setting label="Live telemetry" value={accountEmail ? "Ready to poll" : "Sign-in required"} />{!accountEmail && <div className="auth-form"><input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" type="email" /><button className="outline-button wide" onClick={connectAccount}>Send 6-digit code →</button><small>{authMessage}</small></div>}<button className="outline-button wide" onClick={() => onAction("NodeMCU ingest remains server-authenticated")}>Connect NodeMCU →</button><div className="secret-note">The device token belongs in NodeMCU secrets and the new Supabase Edge Function secrets. It must never be placed in this browser bundle.</div></Panel></section></>;
+}
+
+function AuthLoading() {
+  return <div className="auth-screen auth-loading"><div className="auth-brand-mark">✈</div><div className="eyebrow lime">FLIGHT DECK</div><span>Preparing secure operator access…</span></div>;
+}
+
+function AuthScreen({ onDemo, onSignedIn }: { onDemo: () => void; onSignedIn: (email: string) => void }) {
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [codeSent, setCodeSent] = useState(false);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const requestCode = async () => {
+    if (!email.trim()) {
+      setMessage("Enter your operator email address.");
+      return;
+    }
+    setBusy(true);
+    const error = await sendMagicLink(email.trim());
+    setBusy(false);
+    if (error) {
+      setMessage(error);
+    } else {
+      setCodeSent(true);
+      setMessage("Enter the 6-digit code sent to your inbox.");
+    }
+  };
+
+  const verifyCode = async () => {
+    if (code.length !== 6) {
+      setMessage("Enter all 6 digits.");
+      return;
+    }
+    setBusy(true);
+    const result = await verifyEmailCode(email.trim(), code);
+    setBusy(false);
+    if (result.error) {
+      setMessage(result.error);
+    } else {
+      onSignedIn(result.email);
+    }
+  };
+
+  const updateDigit = (index: number, value: string) => {
+    const digit = value.replace(/\D/g, "").slice(-1);
+    setCode((current) => current.substring(0, index) + digit + current.substring(index + 1));
+  };
+
+  return <div className="auth-screen">
+    <div className="auth-hero">
+      <div className="auth-brand"><span className="auth-logo">✈</span><strong>FLIGHT DECK</strong></div>
+      <div className="eyebrow lime">FIXED-WING OPERATIONS</div>
+      <h1>Clarity on every<br /><em>control surface.</em></h1>
+      <p>One workspace for aircraft telemetry, radio diagnostics, and deliberate preflight checks.</p>
+      <div className="auth-aircraft"><span className="auth-plane">✈</span><small>LOCAL CONTROL FIRST</small></div>
+      <div className="auth-footer">♢ Physical radio control and aircraft failsafes stay onboard.</div>
+    </div>
+    <section className="auth-card">
+      <div className="auth-card-icon">✉</div>
+      {!codeSent ? <><div className="eyebrow lime">SECURE OPERATOR ACCESS</div><h2>Sign in to Flight Deck</h2><p>Enter your email to receive a one-time verification code.</p><input className="auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="operator@example.com" autoComplete="email" /><button className="primary-button wide" onClick={requestCode} disabled={busy}>{busy ? "Sending..." : "Send verification code →"}</button></> : <><div className="eyebrow lime">SECURE OPERATOR ACCESS</div><h2>Check your inbox</h2><p>Enter the verification code sent to <strong>{email}</strong>.</p><div className="code-grid">{Array.from({ length: 6 }, (_, index) => <input key={index} className="code-cell" type="text" inputMode="numeric" maxLength={1} value={code[index] ?? ""} onChange={(event) => updateDigit(index, event.target.value)} aria-label={"Verification digit " + (index + 1)} />)}</div><button className="primary-button wide" onClick={verifyCode} disabled={busy}>{busy ? "Verifying..." : "Verify & enter workspace →"}</button><div className="auth-inline-actions"><button className="text-button" onClick={() => { setCodeSent(false); setCode(""); setMessage(""); }}>Change email</button><button className="text-button" onClick={requestCode} disabled={busy}>Resend code</button></div></>}
+      {message && <div className="auth-message">{message}</div>}
+      <div className="auth-divider" />
+      <button className="outline-button wide" onClick={onDemo}>Explore the interactive demo</button>
+      <small className="auth-safety">Demo data is simulated. Protected aircraft data requires a verified account.</small>
+    </section>
+  </div>;
 }
 
 function SignInModal({ accountEmail, onClose, onSignedIn, onSignedOut }: { accountEmail: string | null; onClose: () => void; onSignedIn: (email: string) => void; onSignedOut: () => void }) {
