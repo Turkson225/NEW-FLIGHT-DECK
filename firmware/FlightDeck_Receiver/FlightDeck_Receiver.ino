@@ -11,7 +11,7 @@
 
 RF24 radio(9,10);
 const byte ADDRESS[6]="FD001";
-const uint8_t FAILSAFE_MS=600;
+const unsigned long FAILSAFE_MS=600;
 const bool PARACHUTE_OUTPUT_ENABLED=false;
 const uint8_t CHUTE_SAFE=0, CHUTE_RELEASE=90;
 
